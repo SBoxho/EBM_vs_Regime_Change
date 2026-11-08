@@ -1,0 +1,27 @@
+# Data specification (PLAN §4; DECISIONS D-01–D-06, D-34).
+archive:
+  base_url: https://data.binance.vision
+  list_url: https://s3-ap-northeast-1.amazonaws.com/data.binance.vision
+  market: spot
+  workers: 4          # polite parallelism; the terms publish no numeric limit (§7.1)
+  timeout_s: 60
+  retries: 4
+
+# Full available history is downloaded (the expanding-history regime label R1 needs it);
+# analysis_start is where model windows may begin.
+symbols:
+  BTCUSDT: {analysis_start: "2018-06-01"}
+  ETHUSDT: {analysis_start: "2018-06-01"}
+  XRPUSDT: {analysis_start: "2018-06-01"}
+  SOLUSDT: {analysis_start: "2020-09-01"}
+last_month: "2026-10"   # last complete monthly file included
+
+intervals:
+  base: 15m             # used for bars and realised variance
+  model: 1h             # modelling bar, aggregated from base
+  crosscheck: 1h        # archive 1h files, downloaded only to verify the aggregation
+
+paths:
+  raw: data/raw
+  interim: data/interim
+  manifest: data/manifest.csv
