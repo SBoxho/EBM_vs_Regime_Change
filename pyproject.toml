@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ebmregime"
+version = "0.1.0"
+description = "Do glass-box (EBM) explanations survive market regime change? Research code."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+# Exact versions are pinned in requirements.lock; these are the direct dependencies.
+dependencies = [
+    "interpret-core==0.7.8",
+    "xgboost==3.4.1",
+    "shap==0.54.1",
+    "scikit-learn==1.9.1",
+    "numpy==2.5.4",
+    "pandas==3.1.1",
+    "scipy==1.18.1",
+    "joblib==1.6.0",
+    "arch",
+    "pyarrow",
+    "pyyaml",
+    "psutil",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib", "nbformat", "nbclient", "ipykernel"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "data: needs the downloaded archive in data/ (run scripts/download_data.py and scripts/build_bars.py first)",
+]

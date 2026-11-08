@@ -1,0 +1,12 @@
+# environments
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# data and results are never committed (Binance Vision terms forbid hosting; see DATA_NOTICE.md)
+/data/
+/results/*
+!/results/summary/
