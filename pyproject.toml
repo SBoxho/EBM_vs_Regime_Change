@@ -35,5 +35,6 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-ra"
 markers = [
+    "slow: interpret fits taking a few seconds (kept in the default run)",
     "data: needs the downloaded archive in data/ (run scripts/download_data.py and scripts/build_bars.py first)",
 ]

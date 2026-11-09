@@ -270,3 +270,58 @@ Sources of evidence:
 - First bars: BTC 2017-08-17 04:00, XRP 2018-05-04 08:00, SOL 2020-08-11 06:00.
 - Invalid hours inside the analysis ranges: BTC, ETH and XRP 113 of 73,800 each (0.153%, the same exchange-wide outages); SOL 32 of 54,048 (0.059%). The longest invalid run is 10 h (2018-06-26).
 - Candidate volume-regime breaks for R3 are listed in `notebooks/00_data_audit.ipynb` §6, for example BTC 2023-04 (log quote volume −1.59). Their causes are not yet established; they must be dated before H3 is interpreted.
+
+---
+
+## M1: features, targets, regimes, splits (2026-11-09)
+
+Implemented by four sub-agents (one per module, each with its own files). The lead wrote the shared primitives (`series.py`) and the configs, reviewed the code, and verified it independently (D-47).
+
+**D-43. Gap tolerance has two classes. Revises D-06.**
+- **Window rule:** an aggregation over k raw hourly values needs ceil(0.90·k) of them (`series.MIN_FRAC`).
+- **History rule:** a reference or history window over derived values needs ceil(0.50·n) (`series.MIN_FRAC_HISTORY`). This covers the 180-day `rv_level_pct` history, the 30 lagged `qv_z_24h` values, and the 30/90/365-day windows of daily regime inputs.
+- Labels stay strict.
+- *Reason [features and regimes implementers, confirmed by lead]:* the single 0.95 rule cascaded. One outage of 9 h or more blanked σ for a week, `rv_level_pct` for up to 180 days, and R1 for 30 days. BTC lost 13% of its feature rows (37% in 2019; 124 undefined R1 days after first definition).
+- *After the change:*
+  - `features_ok` from analysis_start: BTC 0.990, ETH 0.990, XRP 0.969, SOL 0.962.
+  - No undefined R1 days after first definition.
+  - The longest in-range outage (10 h) is below the 16 h a 168 h window tolerates.
+- Decided before any model was fitted.
+
+**D-44. Primary R1 is the trailing-2-year percentile (`r1_vol_2y`). The expanding-history version (`r1_vol`) becomes a sensitivity check. Amends D-20 and PLAN §8.**
+- *Reason [regimes implementer's smoke run]:* crypto volatility trends down, so against an expanding history the "high" state almost disappears after 2022. BTC has 0% high in 2023 and 2025, the H3 covariate C has median 0, and only 13 retrains have C ≥ 0.5. That label could not test H3.
+- *Under the 2-year version (BTC):* high share 23% overall; C mean 0.33, median 0.10; 29 retrains with C ≥ 0.5.
+- The two versions are identical until 730 days of history exist.
+- The decision uses only the distribution of the regime labels, never any model output or target relationship.
+- **Confirmed by the user on 2026-11-09.**
+
+**D-45. Rows that are 0 in every bag must not be passed to `fit`. The M2 model wrapper drops them.**
+- *Evidence [lead, pinned in `tests/test_interpret_api.py::test_labels_of_rows_excluded_from_every_bag`]:* in interpret 0.7.8 the labels of such rows (the purge before the validation tail) leave every shape function bit-identical, but they move the **intercept**, for the classifier and the regressor alike.
+- Dropping the rows removes the effect exactly.
+- Validation (−1) rows also enter the intercept. That is acceptable: their labels are observed by τ.
+
+**D-46. Further interpret 0.7.8 facts pinned by the splits implementer.**
+- **Centring:** `bin_weights_` counts every row passed to `fit` (+1, 0 and −1), so each fit is centred under the density of all rows passed, not only its +1 rows. This amends the wording of D-15. Cross-window comparisons re-centre under the pooled density anyway.
+- **Bin lookup:** score index = `np.digitize(x, cuts) + 1` with `right=False` (a value exactly on a cut goes to the upper bin); NaN goes to index 0.
+- **Replication counts:** counts > 1 in `bags` are accepted and act approximately like integer sample weights, so protocol (ii) is usable.
+- **Determinism:** `n_jobs` does not change results.
+- **Early stopping:** `best_iteration_` ≈ 1,200 rounds against `max_rounds` 50,000 with time-ordered bags.
+- **Purge size:** the h-row purge from `label_time(ts) = ts + (h+1) h ≤ τ` drops exactly h rows on a full grid. PLAN §7's "i + h ≤ τ" is shorthand for this.
+
+**D-47. M1 verification by the lead.**
+- `tests/test_m1_handcheck.py` re-derives every feature, both targets at h = 8 and h = 24, and the R1 (both versions) and R2 states for 25 random real BTC rows or 15 random days. It uses a separate numpy code path from the raw 15m grid and none of the package's helpers.
+  - Agreement is within 1e-9 relative.
+  - A deliberate off-by-one (hour t inside the `qv_z_1h` reference window) would change the value by 6%, so the check can fail.
+- End-to-end truncation test on real data at 2019-05-15 03:00, 2021-04-23 01:00, 2023-03-24 12:00 and 2025-01-01:
+  - features before the cut, labels whose label time is at or before the cut, and regime states of days ending before the cut are bit-identical with and without all later raw data.
+- `series.forward_mean_strict` was rewritten after the targets implementer found that a running rolling sum carried about 1e-16 from beyond t+h. That is not information leakage, but it broke bit-exact no-lookahead tests.
+- Full suite: all tests pass (see M1 summary).
+
+**D-48. M1 descriptive facts, for the record (no models fitted).**
+- **Shuffle offsets:** BTC 239.6 days, SOL 231.5 days.
+- **Direction base rate:** BTC h=8 is 0.515 from 2018-06.
+- **Exact-zero 8h returns** are dropped: SOL 0.34% (tick-size discreteness at low prices), BTC 5 rows.
+- **Mean of `y_vol_h8`:** BTC −0.40 (a log-mean below a log-mean of a right-skewed variance; expected).
+- **Usable training rows per window (features plus h=8 labels):** 8,415–8,775 across all 305 windows.
+- **Primary R1 coverage of the first training window:** BTC and ETH 100%, XRP 54%, SOL 51%, because those symbols need 365 days of history first (PLAN §8).
+- **R1 flicker:** R1 changes state about 10–17 times a year. Short runs near the tercile cuts inflate the event indicator E. C, the primary H3 covariate, is a share-based measure and less affected. No hysteresis is added (not pre-registered).

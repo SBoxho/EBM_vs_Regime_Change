@@ -1,0 +1,27 @@
+# Fixed feature set (PLAN §5.1; DECISIONS D-07, D-08, D-35). Frozen with prereg-v1.
+# Notation: RV_k(t) = trailing_mean(rv, k)  (per-hour realised variance over bars t-k+1..t)
+#           sigma_t  = sqrt(RV_168(t))      (trailing 7-day hourly vol)
+# All trailing statistics use series.MIN_FRAC = 0.95 tolerance; volume statistics use volume_ok hours only.
+sigma_hours: 168
+features:
+  - {name: ret_1h,         family: returns, k: 1}
+  - {name: ret_4h,         family: returns, k: 4}
+  - {name: ret_24h,        family: returns, k: 24}
+  - {name: ret_168h,       family: returns, k: 168}
+  - {name: rv_ratio_4h,    family: vol,     short: 4,   long: 168}
+  - {name: rv_ratio_24h,   family: vol,     short: 24,  long: 168}
+  - {name: rv_level_pct,   family: vol,     rv_hours: 168, history_hours: 4320}   # 180 days
+  - {name: qv_z_1h,        family: volume,  history_hours: 168}
+  - {name: qv_z_24h,       family: volume,  window_hours: 24, history_days: 30}
+  - {name: range_1h,       family: range}
+  - {name: pos_range_24h,  family: range,   k: 24}
+  - {name: pos_range_168h, family: range,   k: 168}
+  - {name: hour,           family: time,    nominal: true}
+  - {name: dow,            family: time,    nominal: true}
+  - {name: taker_imb_4h,   family: flow,    k: 4}
+  - {name: xret_4h,        family: cross,   k: 4}
+cross_partner:            # D-35: BTC's partner is ETH (a BTC-on-BTC copy would duplicate ret_4h)
+  BTCUSDT: ETHUSDT
+  ETHUSDT: BTCUSDT
+  XRPUSDT: BTCUSDT
+  SOLUSDT: BTCUSDT

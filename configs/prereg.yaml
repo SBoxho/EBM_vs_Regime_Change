@@ -1,0 +1,38 @@
+# Pre-registered design settings (PLAN §2, §5.2, §7, §8, §9). DRAFT until git tag prereg-v1 (D-37).
+# After the tag, changes are DEVIATIONS (D-27) except the fallbacks listed in PLAN §9.7.
+
+targets:
+  horizons: {primary: 8, secondary: [24]}        # hours (D-33)
+  direction: {drop_zero_returns: true}
+  vol: {trailing_hours: 168}                       # y = log(mean rv over t+1..t+h / RV_168(t))
+  shuffled:                                        # circular shift of the direction label (D-09)
+    min_days: 90
+    max_days: 400
+    forbid_multiples_of_hours: [24, 168]
+    seed: 20261108
+
+windows:
+  train_months: 12
+  step_months: 1
+  first_tau: {BTCUSDT: "2019-12-01", ETHUSDT: "2019-12-01", XRPUSDT: "2019-12-01", SOLUSDT: "2022-03-01"}
+  last_tau: "2026-10-01"
+  test: one_calendar_month                         # [tau_t, tau_{t+1})
+
+validation:                                        # time-ordered EBM bags (D-13)
+  tail_frac: 0.15                                  # last 15% of the training rows (in time) = -1
+  block_hours: 168                                 # contiguous blocks for bag and half-sample draws
+  bag_train_frac: 0.85                             # per-bag share of training blocks set to +1
+  outer_bags: 14
+
+replicates:                                        # noise-floor protocols (D-17)
+  seed_only: 5                                     # protocol (i)
+  half_samples: 10                                 # protocol (iii)
+  base_seed: 20261108
+
+regimes:                                           # computed daily at 00:00 UTC, applied to the next day's hours (D-20)
+  primary: r1_vol_2y                               # D-44: trailing-2y percentile is primary; expanding r1_vol is sensitivity
+  r1_vol:   {rv_days: 30, min_history_days: 365, cuts: [0.3333333333, 0.6666666667]}
+  r1_vol_2y: {rv_days: 30, history_days: 730, min_history_days: 365, cuts: [0.3333333333, 0.6666666667]}
+  r2_trend: {days: 90, t_threshold: 1.0}
+  r3_liq:   {days: 30, min_history_days: 365, cuts: [0.3333333333, 0.6666666667]}
+  r3_dv_z:  {history_days: 365}
