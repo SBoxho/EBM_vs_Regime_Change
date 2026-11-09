@@ -198,7 +198,7 @@ All facts below were measured on 2026-11-08. Sources, commands and full gap tabl
   7. Flag truncated bars.
   8. Never forward-fill prices across gaps.
   9. A 1h bar is valid only if all four 15m sub-bars are valid.
-  10. Rows whose feature lookback has more than 5% invalid sub-bars, or whose forward horizon contains any invalid sub-bar, are masked. They are excluded from training and testing and counted in the data audit.
+  10. Gap tolerance (revised by D-43): aggregations over raw hours need 90% of their hours, and history windows over derived values need 50%. Rows whose forward horizon contains any invalid hour are masked. They are excluded from training and testing and counted in the data audit.
 - **Archive self-inconsistency (D-40).** In a few hours (≤ 8 per symbol) the archive's 1h file reports more volume and trades than its own 15m files. In one XRP hour it also reports a different close.
   - Hours with a price conflict are invalid.
   - Hours with a volume-only conflict are flagged `volume_suspect`, and volume features treat them as missing.
@@ -446,7 +446,7 @@ Each σ̂² is averaged over the two windows. At Δ = 12, ρ = 0 and DR_adj = DR
 
 Each state at τ uses only data up to τ (D-20).
 
-- **R1, volatility (primary).**
+- **R1, volatility (primary).** *Revised by D-44:* the primary percentile history is the **trailing 2 years**, and the expanding history is the sensitivity check.
   - σ^30d_τ = trailing 30-day realised vol from 15m returns.
   - p_τ = its percentile within the symbol's expanding history, with at least 365 days of history (earlier bars are "undefined" and excluded from regime analyses). For SOL, labels exist from 2021-09, so the training windows of its first 6 retrains are only partly labelled.
   - States: low (p < 1/3), mid, high (p > 2/3).
@@ -731,7 +731,7 @@ docs/                   PLAN.md, DECISIONS.md, LITERATURE.md, (later) PREREG dev
   - all checksums pass;
   - tests run in CI locally.
 
-**M1. Features, targets, regimes, splits (≈ 1 day).**
+**M1. Features, targets, regimes, splits (≈ 1 day).** ✅ Done 2026-11-09: see D-43 to D-48, `scripts/build_panel.py`.
 - Leakage property tests, the `interpret` API pin tests, time-ordered `bags`.
 - **Done when:** all tests pass, and a hand-checked row matches the feature definitions.
 

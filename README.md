@@ -18,7 +18,7 @@ that claim:
 - **Secondary questions.** Is drift concentrated around volatility, trend and liquidity regime changes? Does it
   precede out-of-sample decay? Is it specific to EBM, compared with logistic regression and XGBoost + SHAP?
 
-**Status:** M0 (environment and data) done. M1 (features, targets, regimes, splits) is next. No models have been fitted yet.
+**Status:** M0 (data) and M1 (features, targets, regimes, splits) done. Next: the pre-registration freeze, then M2 (first slice). No models have been fitted yet.
 
 ## Reproduce the data audit
 
@@ -28,6 +28,7 @@ python -m venv .venv
 .venv/Scripts/python -m pip install --no-deps -e .
 .venv/Scripts/python scripts/download_data.py                  # about 74 MB, checksum-verified
 .venv/Scripts/python scripts/build_bars.py
+.venv/Scripts/python scripts/build_panel.py                    # features, targets, regimes
 .venv/Scripts/python -m pytest                                 # unit tests plus data acceptance checks
 ```
 
