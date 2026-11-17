@@ -1,0 +1,13 @@
+# M2 first slice (PLAN §13, D-28 as amended by D-33; docs/M2_SPEC.md §5).
+# Run: python scripts/run_grid.py configs/grid_slice.yaml [--workers 16] [--limit N] [--dry-run]
+# Seeds and replicate counts come only from configs/prereg.yaml `replicates` via splits.replicate_plan;
+# taus "all" = every retrain cut-off of prereg `windows` for the symbol (BTCUSDT: 2019-12 .. 2026-10, 83).
+model: ebm
+arm: primary
+symbols: [BTCUSDT]
+horizon: 8
+taus: all
+data:
+  - {source: real, targets: [dir, vol, shuf]}
+  - {source: "surrogate:0", targets: [dir, vol]}
+expected_jobs: 6225          # 83 x 15 x 3 + 83 x 15 x 2; expand_grid fails if the count differs

@@ -10,3 +10,6 @@ __pycache__/
 /data/
 /results/*
 !/results/summary/
+
+# local build outputs (e.g. the Zenodo upload bundle)
+/dist/

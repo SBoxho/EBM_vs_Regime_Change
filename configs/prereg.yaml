@@ -1,5 +1,16 @@
-# Pre-registered design settings (PLAN §2, §5.2, §7, §8, §9). DRAFT until git tag prereg-v1 (D-37).
-# After the tag, changes are DEVIATIONS (D-27) except the fallbacks listed in PLAN §9.7.
+# Pre-registered design settings (PLAN §2, §3, §5.2, §6, §7, §8, §9). Frozen by git tag prereg-v1
+# (D-37, D-51); SHA-256 hashes in docs/PREREG_HASHES.txt.
+# After the tag, changes are DEVIATIONS (D-27) except the fallbacks listed in PLAN §9.7 (`fallbacks` below).
+# Sections read by code at M1: targets, windows, validation, replicates, regimes. The others are read from M2 on.
+
+symbols:                                           # D-34; data ranges and archive details in configs/data.yaml
+  panel: [BTCUSDT, ETHUSDT, XRPUSDT, SOLUSDT]      # unbalanced panel, symbol = blocking factor (PLAN §2)
+  balanced_panel_sensitivity_from_tau: "2022-03-01"
+
+data_validity:                                     # D-06, D-40, D-43 (implemented in ebmregime.series)
+  min_frac_window: 0.90                            # aggregation over k raw hours needs ceil(0.90 k)
+  min_frac_history: 0.50                           # history window over derived values needs ceil(0.50 n)
+  labels: strict                                   # any invalid hour in the forward horizon masks the row
 
 targets:
   horizons: {primary: 8, secondary: [24]}        # hours (D-33)
@@ -17,6 +28,7 @@ windows:
   first_tau: {BTCUSDT: "2019-12-01", ETHUSDT: "2019-12-01", XRPUSDT: "2019-12-01", SOLUSDT: "2022-03-01"}
   last_tau: "2026-10-01"
   test: one_calendar_month                         # [tau_t, tau_{t+1})
+  purge: label_time_le_tau                         # D-46: row kept iff ts + (h+1) hours <= tau
 
 validation:                                        # time-ordered EBM bags (D-13)
   tail_frac: 0.15                                  # last 15% of the training rows (in time) = -1
@@ -36,3 +48,105 @@ regimes:                                           # computed daily at 00:00 UTC
   r2_trend: {days: 90, t_threshold: 1.0}
   r3_liq:   {days: 30, min_history_days: 365, cuts: [0.3333333333, 0.6666666667]}
   r3_dv_z:  {history_days: 365}
+
+models:                                            # fixed across all windows, no tuning (D-10)
+  ebm:                                             # primary arm (D-11): interpret 0.7.8 defaults except the overrides
+    interpret_version: "0.7.8"
+    overrides:
+      interactions: 0
+      n_jobs: 1                                    # parallelism is across fits (D-25)
+      random_state: per_replicate                  # splits.bags.replicate_plan(...)["seed"]
+      bags: time_ordered                           # (n_rows, outer_bags), validation section above (D-13)
+    drop_rows_zero_in_every_bag: true              # D-45: such rows would move the intercept
+    classifier_for: [direction, shuffled]
+    regressor_for: [vol]
+    defaults_relied_on:                            # pinned values of 0.7.8; classifier / regressor
+      outer_bags: 14
+      inner_bags: 0
+      max_bins: 1024
+      learning_rate: {classifier: 0.015, regressor: 0.04}
+      smoothing_rounds: {classifier: 75, regressor: 500}
+      max_rounds: 50000
+      early_stopping_rounds: 100
+      early_stopping_tolerance: 1.0e-5
+      min_samples_leaf: 4
+      max_leaves: 2
+  ebm_interactions: {interactions: 5}              # interaction arm (D-12); otherwise as `ebm`
+  xgb:                                             # D-23, D-24
+    tree_method: hist
+    max_depth: 3
+    eta: 0.05
+    n_estimators_max: 1000
+    early_stopping_rounds: 50                      # on the time-ordered validation tail
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 5
+    n_jobs: 1
+    time_features: integer_codes
+    shap: {method: interventional, output: raw_margin, background_rows: 100, eval_rows: 2000, lags_months: [1, 12]}
+  linear: {penalty: l2, C: 1.0, ridge_alpha: 1.0, time_features: one_hot, coefficients: raw_units}
+
+explain:                                           # PLAN §6.1 (D-15, D-46)
+  x_ref: {source: union_of_window_rows, cap_rows: 20000, seed: 20261108}
+  cells: {n: 50, kind: pooled_equal_probability, min_rows: 20, merge_ties: true}
+  nominal_features: levels_weighted_by_pooled_frequency
+  ebm_contribution: eval_terms                     # cross-checked by term_scores_[j][digitize(x, cuts) + 1], right=False
+  recentre: pooled_density
+
+stability:                                         # PLAN §6.2-§6.4
+  snr_interpretable: 4.0                           # SNR_j = A_j^2 / sigma2_tot_j
+  monotonicity_min_abs_spearman: 0.3
+  local_monotonicity_noise_multiple: 2.0
+  top_k_jaccard: [3, 5]                            # 3 primary, 5 secondary
+  rank_metric: weightedtau_hyperbolic              # scipy.stats.weightedtau (D-14)
+  lags_months: [1, 2, 3, 6, 12, 18, 24, 36]        # variogram gamma(Delta); headline Delta = 12
+  headline_lag_months: 12
+  stable_pair_selection_frequency: 0.6             # interaction arm
+  per_window_snr: {x_ref: own_window_rows, amplitude: mean_over_seed_only_fits}   # D-50
+
+surrogates:                                        # PLAN §9.3 (D-18, D-50)
+  symbols: [BTCUSDT, ETHUSDT]
+  per_symbol: 3                                    # M2 slice: 1 (BTCUSDT)
+  targets: [direction, vol]
+  method: stationary_block_bootstrap_of_rows       # features and targets resampled jointly
+  mean_block_hours: 252                            # midpoint of the pre-stated 1-2 weeks
+  rows: "[first_tau - train_months, last_tau + 1 month)"
+  timestamps: original_grid                        # resampled rows are placed on the original timestamps
+  seed: 20261108
+
+hypotheses:                                        # PLAN §2; Holm family = H1-vol, H1-dir, H2, H3, H4, H5
+  g0:
+    statistic: median_DR_tot_at_lag_12
+    arms: [shuffled, surrogate]
+    pass_ci_within: [0.8, 1.25]
+    ci_level: 0.95
+    fallback: "DR* = DR / median surrogate DR at the same lag; shuffled control uses the direction surrogate (D-50)"
+  h1: {lag_months: 12, drift_ci_lower_above: 1.25, equivalence: [0.8, 1.25], dir_requires_snr_above_shuffled: true}
+  h2: {target: vol, reliable_ci_upper_below: 0.25, matters_ci_lower_above: 0.5}
+  h3: {lag_months: 1, covariate: C_pi_high_added_minus_dropped, regime: r1_vol_2y, holm_p: 0.05, null_upper_sd_per_unit_C: 0.25}
+  h4: {target: vol, leads: [0, 1, 2], ccf_lags: [-3, 3], placebo_min_shift_months: 6, placebo_draws: 999, null_partial_r_ci90_upper: 0.2}
+  h5: {target: vol, lag_months: 12, equivalence_log: 0.22314355}   # log(1.25)
+
+statistics:                                        # PLAN §9
+  bootstrap: {kind: stationary, block_length: arch_optimal_b_sb, floor: "max(3, Delta)", sensitivity_multiplier: 2, same_blocks_across_symbols: true, ci_level: 0.95}
+  within_month_block: "max(b_sb, h)"
+  neff: {rule: geyer_initial_positive, cap_frac: 0.1}
+  multiplicity: {primary: holm, fwer: 0.05, exploratory: bh, q: 0.10}
+  skill:
+    vol: r2_oos_vs_training_climatology            # climatology = training-window mean of y_vol
+    direction: log_loss_skill_vs_training_base_rate
+    prediction: seed_ensemble_mean                 # per-fit skill also reported (D-50)
+
+fallbacks:                                         # PLAN §9.7: the only changes allowed after prereg-v1
+  - "G0 fails -> surrogate-calibrated DR*"
+  - "degenerate block-length estimate -> floor values of §9.1"
+  - "cell merging leaves < 10 cells for a feature -> G = 20 for that feature"
+  - "a symbol loses > 10% of its windows to masking -> drop it from pooling, report separately"
+  - "wall time > 2x estimate -> reductions of PLAN §11.3 in order (never the primary arm)"
+
+m2_go_no_go:                                       # PLAN §13 M2
+  max_fits_lost_on_resume: 15                      # "fewer than 16"
+  g0: "passes on shuffled control, or DR* fallback passes"
+  positive_control: {target: vol, median_snr_above: 4.0, min_features: 3, oos_r2_positive_month_share: 0.8}
+  max_wall_time_ratio: 2.0
+  on_positive_control_failure: stop_and_report     # no tuning

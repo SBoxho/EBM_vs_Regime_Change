@@ -1,7 +1,9 @@
 # Fixed feature set (PLAN §5.1; DECISIONS D-07, D-08, D-35). Frozen with prereg-v1.
 # Notation: RV_k(t) = trailing_mean(rv, k)  (per-hour realised variance over bars t-k+1..t)
 #           sigma_t  = sqrt(RV_168(t))      (trailing 7-day hourly vol)
-# All trailing statistics use series.MIN_FRAC = 0.95 tolerance; volume statistics use volume_ok hours only.
+# Gap tolerance (D-43): aggregations over k raw hours need ceil(series.MIN_FRAC * k) = ceil(0.90 k) values;
+# history windows over derived values need ceil(series.MIN_FRAC_HISTORY * n) = ceil(0.50 n).
+# Volume statistics use volume_ok hours only (D-40).
 sigma_hours: 168
 features:
   - {name: ret_1h,         family: returns, k: 1}

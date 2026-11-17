@@ -18,7 +18,9 @@ that claim:
 - **Secondary questions.** Is drift concentrated around volatility, trend and liquidity regime changes? Does it
   precede out-of-sample decay? Is it specific to EBM, compared with logistic regression and XGBoost + SHAP?
 
-**Status:** M0 (data) and M1 (features, targets, regimes, splits) done. Next: the pre-registration freeze, then M2 (first slice). No models have been fitted yet.
+**Status:** M0 (data) and M1 (features, targets, regimes, splits) done. The pre-registration is frozen as git tag
+`prereg-v1` (hashes in [`docs/PREREG_HASHES.txt`](docs/PREREG_HASHES.txt)). Next: M2 (first slice). No models
+have been fitted on real data yet.
 
 ## Reproduce the data audit
 
