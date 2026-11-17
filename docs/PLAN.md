@@ -1,7 +1,8 @@
 # Research and implementation plan
 
 **Project:** Do glass-box explanations survive regime change?
-**Status:** draft for approval (2026-11-08). No implementation has started.
+**Status:** pre-registered, frozen as git tag `prereg-v1` on 2026-11-17 (D-51). M0 and M1 are done; no model has been fitted on real data. Changes to §2, §3, §9 or `configs/prereg.yaml` after the tag are logged as deviations (D-27).
+**Revision 2 (2026-11-17, pre-freeze consistency pass)** aligns the plan with D-43 to D-48 and fixes the inconsistencies listed in D-49, with the clarifications in D-50.
 **Revision 1 (2026-11-08)** incorporates your answers to O-1 to O-7:
 - 1h bars with an **8-hour** horizon;
 - normalised vol target;
@@ -66,8 +67,9 @@ The drift ratio is calibrated on stationary surrogate data and on a shuffled-tar
 
 ### Pre-registration rule
 
-This section, §3 and §9 (with `configs/prereg.yaml`) are frozen before the first slice touches real data (D-37):
+This section, §3 and §9 (with `configs/prereg.yaml`, which holds every numeric setting and threshold, and `configs/features.yaml`) are frozen before the first slice touches real data (D-37, D-51):
 - an annotated git tag `prereg-v1`;
+- SHA-256 hashes of the frozen files and of `src/` in `docs/PREREG_HASHES.txt`;
 - an **embargoed Zenodo record**. You deposit the frozen files; the record shows their SHA-256 hashes publicly; the DOI and timestamp are public immediately; the files open on a date you choose.
 
 A git history alone can be rewritten, so the Zenodo record is the timestamp that an outside reviewer can trust.
@@ -82,7 +84,7 @@ After the freeze:
 Unless stated otherwise, the primary analysis uses:
 - EBM with `interactions=0`;
 - 1h bars, primary horizon h = 8 bars (8 hours);
-- primary regime R1;
+- primary regime R1 with the **trailing-2-year** percentile history (`r1_vol_2y`, D-44); the expanding-history version is a sensitivity check;
 - all 4 symbols pooled as an unbalanced panel (SOL enters from 2022-03), with symbol treated as a blocking factor.
 
 ### Hypotheses
@@ -90,7 +92,8 @@ Unless stated otherwise, the primary analysis uses:
 **G0: validity gate (not counted as a hypothesis).**
 - Statistic: median drift ratio at Δ = 12 months for the shuffled-target control and for the stationary surrogates (§9.3).
 - Pass: 95% CI inside [0.8, 1.25].
-- If it fails, the pre-specified fallback applies: use the surrogate-calibrated ratio (§9.3).
+- If it fails, the pre-specified fallback applies: use the surrogate-calibrated ratio DR* (§9.3).
+- The fallback passes if the 95% CI of the median DR* at Δ = 12 lies inside [0.8, 1.25] for the shuffled control (calibrated with the direction-target surrogate) and for the surrogates themselves (D-50).
 - If even the calibrated ratio fails the gate, stop and fix the floor before looking at any real-target result.
 
 **H1: temporal drift beyond noise.** Tested separately for the vol target (H1-vol) and the direction target (H1-dir).
@@ -111,7 +114,7 @@ Unless stated otherwise, the primary analysis uses:
 
 **H3: drift concentrated at regime change.**
 - Model, on consecutive retrains (Δ = 1): log DR_t = a + b·C_t + c·log σ_τ + symbol FE + ε.
-- C_t is the change in high-vol fraction between the month added and the month dropped (§8).
+- C_t is the change in high-vol fraction between the month added and the month dropped, under the primary R1 (`r1_vol_2y`, §8).
 - Decision:
   - b > 0 with Holm-adjusted p < 0.05: **concentrated**;
   - CI on b containing 0 with upper bound below 0.25 SD(log DR) per unit C: **not concentrated**;
@@ -149,7 +152,7 @@ All metrics are defined precisely in §6.
 |---|---|---|
 | **Primary** | DR_tot: noise-floor-normalised, density-weighted main-effect shape distance, summed over terms | H1, H3, H5, G0 |
 | **Primary** | Seed share σ²_seed / σ²_tot | H2 |
-| **Primary** | Out-of-sample skill: R²_OOS of log normalised RV against training climatology (vol); log-loss skill against base rate (direction) | H4 |
+| **Primary** | Out-of-sample skill of the seed-ensemble mean prediction on the test month: R²_OOS of log normalised RV against training climatology (vol); log-loss skill against the training base rate (direction). Per-fit skill is also reported | H4 |
 | Secondary | Per-feature DR_j; drift variogram γ(Δ) for Δ ∈ {1,2,3,6,12,18,24,36} months | Q1 |
 | Secondary | Shape amplitude A_j and SNR_j | always reported next to stability metrics |
 | Secondary | Shape correlation ρ_j; sign agreement SA_j; monotonicity agreement MA_j | Q1 |
@@ -284,14 +287,14 @@ Notation:
 
 The fitted shapes are not directly comparable, for two reasons:
 - Each EBM fit has its own bin edges (`bins_`).
-- `interpret` centres each term to mean zero under *its own* training bin weights. We verified this in 0.7.8: the bin-weighted mean of a term is about 1e-17.
+- `interpret` centres each term to mean zero under *its own* bin weights, which count every row passed to `fit` (+1, 0 and −1; D-46). We verified this in 0.7.8: the bin-weighted mean of a term is about 1e-17.
 
 So we never compare `term_scores_` index by index. Instead:
 
-1. **Reference sample.** X_ref = the pooled training rows of w_a and w_b, capped at 20,000 with a fixed seed. Both windows exist by the later window's training cut-off, so the comparison is causal.
+1. **Reference sample.** X_ref = the pooled training rows of w_a and w_b (the union of the rows each window passes to `fit`, so overlapping rows count once), capped at 20,000 with a fixed seed. Both windows exist by the later window's training cut-off, so the comparison is causal.
 2. **Cells.** For each continuous feature, define G = 50 equal-probability cells C_{jk} from pooled quantiles of X_ref. Merge ties, and merge cells with fewer than 20 rows. Nominal features use their levels, weighted by pooled frequency.
 3. **Cell-averaged contribution.** f_{m,j}(k) = mean over rows i in C_{jk} of c_{m,j}(x_i), where:
-   - **EBM:** c = `eval_terms(X_ref)[:, j]`, cross-checked by a manual lookup `term_scores_[j][np.digitize(x, bins_[j][0]) + 1]` in tests. Index 0 is the missing bin and the last index is the unseen bin (verified: len = cuts + 3).
+   - **EBM:** c = `eval_terms(X_ref)[:, j]`, cross-checked by a manual lookup `term_scores_[j][np.digitize(x, bins_[j][0]) + 1]` in tests (`right=False`: a value exactly on a cut goes to the upper bin; NaN goes to index 0; D-46). Index 0 is the missing bin and the last index is the unseen bin (verified: len = cuts + 3).
    - **XGBoost:** c = interventional TreeSHAP value on the raw margin, with one common background of 100 rows drawn from X_ref (D-23). Path-dependent SHAP would use each model's own training cover as the background, which confounds explanation drift with background drift.
    - **Logistic or ridge regression:** c = β_j^raw · x_ij, with coefficients converted back to raw feature units so that each window's scaler does not redefine the axis. Nominal features use one coefficient per level.
 4. **Re-centre under the common density.** f̃_{m,j}(k) = f_{m,j}(k) − Σ_k ω_k f_{m,j}(k). For equal-probability cells ω_k = 1/G, so plain averages over cells are already density-weighted. Sparse tails get little weight by construction, which is what we want. The intercept is reported separately and never counts as drift.
@@ -393,6 +396,7 @@ E[DR] ≈ 1 under no drift with disjoint windows. DR_tot is the main-effect aggr
 Each σ̂² is averaged over the two windows. At Δ = 12, ρ = 0 and DR_adj = DR.
 
 **Signal-to-noise:** SNR_j = A²_j / σ²_tot,j. Shapes are "interpretable" where SNR > 4, i.e. the amplitude exceeds two noise SDs.
+- Per window (D-50): A²_j is the mean of A²_{m,j} over the 5 seed-only fits, and both A²_j and σ²_tot,j are computed on X_ref = that window's own rows. Summaries over windows are medians.
 
 ### 6.5 Why these metrics
 
@@ -405,7 +409,8 @@ Each σ̂² is averaged over the two windows. At Δ = 12, ρ = 0 and DR_adj = DR
 ## 7. Retraining design
 
 - **Windows (D-19).** Rolling, length L = 12 months, step S = 1 month.
-  - Model M_t is trained at cut-off τ_t on rows i with τ_t − L ≤ i and i + h ≤ τ_t. Requiring the label to be observed by τ_t is the purge.
+  - Model M_t is trained at cut-off τ_t on rows i with τ_t − L ≤ i and i + h ≤ τ_t. Requiring the label to be observed by τ_t is the purge. Exactly: the label of the row stamped ts is known at ts + (h+1) hours, so the condition is ts + (h+1) h ≤ τ_t, which drops exactly h rows on a full grid (D-46).
+  - Rows that are 0 in every bag (the purge before the validation tail) are dropped before `fit`, because their labels would move the intercept (D-45).
   - M_t is tested on [τ_t, τ_{t+1}), one calendar month.
   - BTC, ETH, XRP: features are valid from 2018-12-01 (180-day burn-in after 2018-06-01). So τ_1 = 2019-12-01 and τ_last = 2026-10-01, giving **83 retrains** and 71 zero-overlap Δ = 12 pairs.
   - SOL: features are valid from 2021-03-01. So τ_1 = 2022-03-01, giving **56 retrains** and 44 Δ = 12 pairs.
@@ -448,9 +453,10 @@ Each state at τ uses only data up to τ (D-20).
 
 - **R1, volatility (primary).** *Revised by D-44:* the primary percentile history is the **trailing 2 years**, and the expanding history is the sensitivity check.
   - σ^30d_τ = trailing 30-day realised vol from 15m returns.
-  - p_τ = its percentile within the symbol's expanding history, with at least 365 days of history (earlier bars are "undefined" and excluded from regime analyses). For SOL, labels exist from 2021-09, so the training windows of its first 6 retrains are only partly labelled.
+  - p_τ = its percentile within the symbol's trailing 730 days of history (`r1_vol_2y`), with at least 365 days of history (earlier bars are "undefined" and excluded from regime analyses). Until 730 days exist this equals the expanding version.
+  - Labels exist from 2018-09-05 (BTC), 2018-09-08 (ETH), 2019-05-19 (XRP) and 2021-08-26 (SOL); the 30-day vol needs half its days (D-43) and then 365 days of history. So the training windows of the first 6 retrains of XRP and of SOL are only partly labelled (54% and 51% for the first window; D-48). BTC and ETH windows are fully labelled.
   - States: low (p < 1/3), mid, high (p > 2/3).
-  - Sensitivity: a trailing 2-year history instead of expanding.
+  - Sensitivity: the percentile within the symbol's expanding history (`r1_vol`, the original primary before D-44).
 - **R2, trend.**
   - T_τ = t-statistic of the trailing 90-day mean daily log return.
   - States: bull (T > 1), bear (T < −1), sideways otherwise.
@@ -498,16 +504,20 @@ Each state at τ uses only data up to τ (D-20).
 
 The half-sample argument is exact only for smooth estimators. EBM with early stopping may deviate. Calibration therefore has two arms:
 - **Stationary surrogates.** Stationary-block-bootstrap the full sequence of precomputed (feature, target) rows for BTC and ETH:
-  - mean block length 1–2 weeks (≫ h);
-  - target resampled jointly with its features;
-  - 3 surrogates per symbol.
+  - rows from the first training window's start to the end of the last test month, i.e. [τ_1 − 12 months, τ_last + 1 month);
+  - mean block length 252 hours (the midpoint of 1–2 weeks, ≫ h; D-50), circular, rows taken in time order;
+  - target resampled jointly with its features (masked rows are carried along and stay masked);
+  - the resampled rows are placed on the original timestamps, so windows, purge, bags and test months are built exactly as for real data;
+  - direction and vol targets; 3 surrogates per symbol (M2: 1, for BTC); seeds fixed in `configs/prereg.yaml`.
 
   Mixing the regimes uniformly makes the surrogate stationary by construction. The full pipeline is then run on it, and its DR at each Δ is the empirical null.
 - **Shuffled-target arm** (on real data, all symbols).
 
 **Pre-specified fallback.** If G0 fails, report the surrogate-calibrated ratio:
 
-  DR* = DR / median surrogate DR (at the same Δ and target)
+  DR* = DR / median surrogate DR (at the same Δ and target; the shuffled control uses the direction-target surrogate, since the surrogates carry no shuffled target)
+
+DR* passes G0 if the 95% CI of its median at Δ = 12 lies inside [0.8, 1.25] both for the shuffled control and for the surrogates themselves (each surrogate's DR divided by the median over all surrogates of that target). The second check tests only the dispersion of the surrogate ratio, since its median is 1 by construction (D-50).
 
 ### 9.4 Drift structure (H1, Q1)
 
@@ -741,7 +751,8 @@ docs/                   PLAN.md, DECISIONS.md, LITERATURE.md, (later) PREREG dev
 - M2 starts only after the Zenodo DOI exists. The DOI goes into README and DECISIONS.
 
 **M2. First slice (≈ 1 day; under 1 wall-hour of compute).**
-- Scope: BTCUSDT, h = 8, EBM `interactions=0`, direction + vol + shuffled targets, all 83 windows, R = 5 + 10, plus 1 stationary surrogate.
+- Scope: BTCUSDT, h = 8, EBM `interactions=0`, direction + vol + shuffled targets, all 83 windows, R = 5 + 10, plus 1 stationary surrogate (direction and vol targets).
+- Estimate for criterion 4, from §11.2 unit costs: real data 83 × (37 + 37 + 66) s = 11,620 CPU-s; surrogate 83 × (37 + 66) s = 8,549 CPU-s; 6,225 fits, ≈ 20,200 CPU-s / 10.5 ≈ **0.53 wall-hours**, excluding the cheap explain and metric stages.
 - BTC's cross feature needs ETH, so M0 downloads ETH too.
 - Produces: noise floor (σ² decomposition, seed share), γ(Δ) for all Δ, the DR_tot distribution, per-feature SNR, shape gallery, and the re-timed compute table.
 - **Go / no-go for the full grid. All must hold:**

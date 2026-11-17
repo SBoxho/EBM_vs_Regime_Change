@@ -1,0 +1,32 @@
+Pre-registration prereg-v1: "Do glass-box explanations survive regime change?"
+Frozen 2026-11-17, before any model was fitted on real data (DECISIONS D-27, D-37, D-49 to D-51).
+
+SHA-256 of the frozen content, as stored in git (LF line endings, UTF-8). This file is not hashed
+itself; it is committed together with the files it lists, in the commit tagged prereg-v1.
+
+44d7fde6e3b66068e8b3c2da45a4324bd4c1fe90113547c28befbec6b1b9cd7e  configs/prereg.yaml
+3b22ff44cf1a5dae5c7de48a5119eda4e4979aac26bb8aa225f133c4310e6570  configs/features.yaml
+eac5d6fe826aadc41b62d2014e50194fca35c37734b8f70d82d4672b693e189a  docs/PLAN.md
+eb6d1d4337ae7d7b9a21cd0251777c68f7da47b2f68875e4f6693e033e9059b2  docs/DECISIONS.md
+dfb283ab8dfe69c3666cfc445c8bfc706eb608088e5b9f33c9ccbd0b9245aa0f  src.tar (git archive of src/, see below)
+
+git object ids (content-addressed, SHA-1):
+  configs/prereg.yaml    blob 0bd9a3e4f8dbe6bc30f2c64e2b5d34af2c08b4be
+  configs/features.yaml  blob d7cde3737ce0d1ae67e9400f7980c3eb4e2d8d3c
+  docs/PLAN.md           blob ba3363c627cab3e2f816f918022f6ccb7c98f5cd
+  docs/DECISIONS.md      blob 35e52f29211f267b7902bc4a6bb799849476cfd1
+  src/                   tree 49197ecbdf0fed9189de464d4c7297000c9b856d
+
+How to verify (git 2.47; any POSIX shell, including Git Bash on Windows):
+
+  for f in configs/prereg.yaml configs/features.yaml docs/PLAN.md docs/DECISIONS.md; do
+    git show prereg-v1:$f | sha256sum
+  done
+  git archive --format=tar --prefix=src/ --mtime="1970-01-01 00:00:00 +0000" prereg-v1:src | sha256sum
+
+Notes:
+- Hash the git content (git show), not a Windows working copy: with core.autocrlf=true the working
+  copy has CRLF line endings and therefore different hashes.
+- The src archive is built from the src/ tree (not from the commit), with a fixed mtime, so it
+  contains no commit id or timestamp and is reproducible. If a future git version changes the tar
+  layout, the tree id above still identifies src/ exactly.

@@ -41,7 +41,7 @@ Sources of evidence:
 - *Conflict resolved:* the method draft suggested h = 24 as primary. Rejected, because n_eff ≈ 365 per window would leave direction-target shapes almost entirely noise.
 - One shared h across targets keeps the purge and overlap structure identical.
 
-**D-06. Cleaning rules.**
+*(Gap tolerance revised by D-43.)* **D-06. Cleaning rules.**
 - *Rules:* units normalised by magnitude (values above 1e14 are µs); off-grid bars snapped to the grid; O=H=L=C zero-volume bars treated as missing; truncated bars flagged; no forward-fill across gaps; 1h bars valid only if all four 15m sub-bars are valid; feature and label validity masks.
 - *Evidence [data]:*
   - spot timestamps are µs from the 2025-01 file onward, documented in the README and confirmed in the files (`1735689600000000`); futures are unaffected;
@@ -81,7 +81,7 @@ Sources of evidence:
 - *Conflict resolved:* the compute sub-agent recommended a reduced config (outer_bags = 4, interactions = 10, max_bins = 256) to save time. Rejected for the primary arm. Measured cost of 14 bags without pairs is 3.0 s per fit at 8,760 rows [verify], so defaults are affordable, and reducing bags would change the very variance we measure.
 - *Evidence [compute]:* same-seed fits are bit-identical at n_jobs = 1 and −1, so parallelising across fits is safe.
 
-**D-12. Interactions are studied in a separate arm with `interactions=5`. Pairs are purified before pair-shape comparison.**
+*(Pair count for 16 features in D-35.)* **D-12. Interactions are studied in a separate arm with `interactions=5`. Pairs are purified before pair-shape comparison.**
 - *Reason:* the default "3x" means 42 pairs for 14 features, which dilutes everything and costs about 85 s per fit.
 - *Evidence [verify]:* on 0.7.8, main-effect `term_scores_` are bit-identical (max abs diff 0.0) between interactions = 0 and 5 with the same seed and bags. Pairs are fitted after the mains, with the mains frozen. Only the intercept moves, by about 3e-4. So the pair arm cannot contaminate the primary analysis.
 - Pairs are only mean-centred by default (`purify_result=False` [method, source-read]), hence explicit purification [lit: Lengerich et al. 2020].
@@ -94,11 +94,11 @@ Sources of evidence:
 
 ## Metrics
 
-**D-14. Primary rank metric: weighted Kendall τ, with hyperbolic top-weighting.**
+*(16 features since D-35.)* **D-14. Primary rank metric: weighted Kendall τ, with hyperbolic top-weighting.**
 - *Reason:* the bottom of a 14-feature ranking is near-zero noise, and plain Spearman or Kendall penalise churn there as much as at the top. Weighted τ handles ties and is one library call.
 - RBO is a sensitivity check [lit: Webber et al. 2010].
 
-**D-15. Shapes are compared as cell-averaged contributions on 50 pooled equal-probability cells of a pair-specific reference sample, re-centred under that common density.**
+*(Centring wording amended by D-46.)* **D-15. Shapes are compared as cell-averaged contributions on 50 pooled equal-probability cells of a pair-specific reference sample, re-centred under that common density.**
 - *Reason:* fits have different bin edges, and each fit is centred under its own window density.
 - *Evidence [verify]:* the bin-weighted mean of a term is about 1e-17, i.e. each fit is centred under its own density. len(term_scores_) = cuts + 3, with missing and unseen bins at the ends.
 - Equal-probability cells make every summary density-weighted automatically, so sparse tails cannot dominate.
@@ -126,11 +126,11 @@ Sources of evidence:
 - *Reason:* expanding windows stabilise by construction. A 12-month window gives about 8,700 rows. With a 1-month step, consecutive retrains differ by one month added and one dropped, which makes regime-change covariates precise.
 - 6- and 24-month windows are exploratory.
 
-**D-20. Regimes: R1 = trailing 30-day RV percentile within the symbol's expanding history (primary); R2 = 90-day trend t-statistic; R3 = Amihud liquidity percentile. The full-sample HMM is descriptive only.**
+*(Amended by D-44: the trailing-2-year R1 is primary.)* **D-20. Regimes: R1 = trailing 30-day RV percentile within the symbol's expanding history (primary); R2 = 90-day trend t-statistic; R3 = Amihud liquidity percentile. The full-sample HMM is descriptive only.**
 - *Reason:* the three are simple, causal and distinct. Volatility is the most persistent and best-measured state.
 - A full-sample HMM uses the future, so it lives in a separate module and every figure that uses it is labelled.
 
-**D-21. Early-warning test.**
+*(Direction-skill SE updated by D-33: about 0.06 AUC at h = 8.)* **D-21. Early-warning test.**
 - Only leads k ≥ 0 count, because k = −1 is mechanical.
 - Primary test: an incremental panel regression controlling for regime change, vol level, covariate shift (PSI) and prediction drift.
 - Placebos: circular shifts of at least 6 months (999 draws), time-shuffled windows, and drift computed from the shuffled-target models.
@@ -325,3 +325,30 @@ Implemented by four sub-agents (one per module, each with its own files). The le
 - **Usable training rows per window (features plus h=8 labels):** 8,415–8,775 across all 305 windows.
 - **Primary R1 coverage of the first training window:** BTC and ETH 100%, XRP 54%, SOL 51%, because those symbols need 365 days of history first (PLAN §8).
 - **R1 flicker:** R1 changes state about 10–17 times a year. Short runs near the tercile cuts inflate the event indicator E. C, the primary H3 covariate, is a share-based measure and less affected. No hysteresis is added (not pre-registered).
+
+---
+
+## Pre-registration freeze (2026-11-17)
+
+**D-49. Consistency pass before the freeze. No model had been fitted on real data.**
+- PLAN §2, §3, §9 and `configs/prereg.yaml` were checked against D-01 to D-48. Fixed:
+  - PLAN §8 still called the expanding-history R1 primary and the trailing-2-year version the sensitivity check, the reverse of D-44. Corrected; PLAN §2 now names `r1_vol_2y` as the primary R1, and H3's covariate C uses it.
+  - PLAN §8 said only SOL's first windows are partly labelled. XRP's are too (D-48). The first defined R1 days, read from the panel (regime labels only), are 2018-09-05 (BTC), 2018-09-08 (ETH), 2019-05-19 (XRP) and 2021-08-26 (SOL).
+  - PLAN §12 says `prereg.yaml` holds "metrics, thresholds", but it held only targets, windows, validation, replicates and regimes. Added, transcribed from PLAN §2, §6, §7, §9, §13 and D-11, D-23, D-24, D-43, D-45, D-46: symbols, gap tolerance, the purge rule, the EBM, XGBoost and linear configurations, the explain and stability settings, the surrogate design, every hypothesis threshold, the statistics settings, the §9.7 fallbacks and the M2 go/no-go criteria. Existing keys are unchanged.
+  - The EBM defaults recorded in `prereg.yaml` were read from the installed interpret 0.7.8 signatures (`inspect.signature`, no fitting) and match PLAN §7.
+  - PLAN §6.1 said each term is centred under its own *training* weights; D-46 found the weights count every row passed to `fit`. Wording corrected, and the D-46 lookup convention (`right=False`, NaN to index 0) added.
+  - PLAN §7 now states the exact purge (D-46) and the D-45 rule that rows which are 0 in every bag are dropped before `fit`.
+  - `configs/features.yaml` described the old 0.95 gap tolerance. Corrected to D-43 (0.90 window rule, 0.50 history rule).
+  - Amendment markers added in front of D-06, D-12, D-14, D-15, D-20 and D-21, pointing to the later entries that changed them (D-21's SE of 0.04 AUC was for h = 4).
+  - "DRAFT" note removed from `prereg.yaml`; PLAN status line updated.
+- The test suite passes unchanged (145 tests).
+
+**D-50. Clarifications written into the pre-registration before the freeze.** Each fills a gap the plan left open. None uses any model output.
+- **Surrogate mean block length: 252 hours**, the midpoint of the pre-stated "1–2 weeks". Rows from [τ_1 − 12 months, τ_last + 1 month) are resampled circularly in time order, features and targets jointly, and placed on the original timestamps so that windows, purge, bags and test months are built as for real data.
+- **G0 fallback check.** The shuffled control has no surrogate counterpart, so its DR* uses the direction-target surrogate. DR* passes if the 95% CI of its median at Δ = 12 lies inside [0.8, 1.25] for the shuffled control and for the surrogates themselves. The surrogate check tests only dispersion, because its median is 1 by construction.
+- **X_ref for a pair** is the union of the rows the two windows pass to `fit` (overlapping rows count once), capped at 20,000.
+- **Per-window SNR** (used by H1-dir and M2 criterion 3): A²_j is the mean of A²_{m,j} over the 5 seed-only fits; A²_j and σ²_tot,j are both computed on X_ref = the window's own rows. Summaries over windows are medians.
+- **Primary skill** uses the seed-ensemble mean prediction (mean of the 5 seed-only full-window fits) on the test month; per-fit skill is also reported. Vol climatology is the training-window mean of `y_vol`; the direction base rate is the training-window mean of `y_dir`.
+- **M2 wall-time estimate** for criterion 4, from the PLAN §11.2 unit costs: 6,225 fits, about 20,200 CPU-seconds, **0.53 wall-hours** at 10.5 effective cores (PLAN §13).
+
+**D-51. Freeze.** `configs/prereg.yaml`, `configs/features.yaml`, `docs/PLAN.md`, `docs/DECISIONS.md` and `src/` are frozen by the annotated tag `prereg-v1`. Their SHA-256 hashes, and how to recompute them, are in `docs/PREREG_HASHES.txt`. The Zenodo deposit is prepared in `docs/ZENODO_DEPOSIT.md`, added after the tag because it quotes the tagged commit; the DOI is recorded in a later entry. From here on, any change to a frozen item other than a PLAN §9.7 fallback is a **DEVIATION** (D-27).
