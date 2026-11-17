@@ -352,3 +352,41 @@ Implemented by four sub-agents (one per module, each with its own files). The le
 - **M2 wall-time estimate** for criterion 4, from the PLAN §11.2 unit costs: 6,225 fits, about 20,200 CPU-seconds, **0.53 wall-hours** at 10.5 effective cores (PLAN §13).
 
 **D-51. Freeze.** `configs/prereg.yaml`, `configs/features.yaml`, `docs/PLAN.md`, `docs/DECISIONS.md` and `src/` are frozen by the annotated tag `prereg-v1`. Their SHA-256 hashes, and how to recompute them, are in `docs/PREREG_HASHES.txt`. The Zenodo deposit is prepared in `docs/ZENODO_DEPOSIT.md`, added after the tag because it quotes the tagged commit; the DOI is recorded in a later entry. From here on, any change to a frozen item other than a PLAN §9.7 fallback is a **DEVIATION** (D-27).
+
+---
+
+## After the freeze
+
+**D-52. DEVIATION from D-37 and PLAN §2 (pre-registration rule) and §13: no Zenodo record. The pre-registration rests on the annotated git tag `prereg-v1` and the SHA-256 list in `docs/PREREG_HASHES.txt` only.** (2026-11-17)
+- *Reason:* your decision, before any model was fitted on real data.
+- *Consequence:* there is no third-party timestamp. A reader has to trust the git history (the tag, its commit date, and the hashes) that the plan was fixed before the slice. The paper must say so plainly and must not call the study "registered" in the sense of a public registry.
+- *Scope:* this changes how the freeze is evidenced, not what is frozen. No hypothesis, metric, target, horizon, feature or test changes, so no hypothesis is demoted to exploratory.
+- M2 starts without the DOI condition of PLAN §13; open question O-9 is closed.
+
+---
+
+## M2: first slice (2026-11-17)
+
+Implemented by five sub-agents (models, runner, explain, stability metrics, surrogate), one per module, each against the interface spec `docs/M2_SPEC.md` written by the lead. The lead wrote the shared primitives (`panel.py`, `stats/bootstrap.py`), the comparison stage (`runner/compare.py`), the go/no-go evaluation (`report/slice.py`), reviewed the code, and verified it independently (D-54).
+
+**D-53. Engineering choices made during M2 (none touches a frozen item).**
+- **Fit cache key (amends D-26).** The key hashes the files that determine a fit (`config.py`, `series.py`, `panel.py`, `splits/*`, `models/*`, `stability/surrogate.py`, `runner/jobs.py`, `runner/execute.py`, plus the interpret version), not the git SHA of all of `src/`. *Reason:* a key over all of `src/` would invalidate every fit whenever metric or report code changed, and the metric stage reads fits without changing them. The git HEAD SHA and a dirty flag are still stored in every fit's metadata. The prereg part of the key hashes `configs/prereg.yaml` and `configs/features.yaml` with LF line endings; the data part hashes the manifest hash and the panel file.
+- **Storage.** Term scores are float32 (PLAN §11.2); continuous bin cuts are stored as float64, so that bin membership of any value is exactly what the fitted model used; nominal categories as int64. Nothing is pickled. About 190 KB per fit.
+- **Classifier labels.** The panel stores `y_dir` and `y_shuf` as float 0.0/1.0. interpret 0.7.8 turns float labels into the string classes `'0.0'`/`'1.0'`, so the fit job casts them to int64 (after checking they are 0/1).
+- **Surrogates.** `hour` and `dow` travel with their source row like every other column (PLAN §9.3: "(feature, target) rows" resampled jointly), so in a surrogate they need not match the new timestamp.
+- **Not implemented at M2 (secondary metrics):** the noise-floor ratio for the importance TV distance (PLAN §6.3 does not define its floor), the feature-family distance, local monotonicity on decile steps. They are added before M3.
+
+**D-54. M2 slice results and verification (BTCUSDT, h = 8; 6,225 fits; `notebooks/01_slice_noise_floor_and_drift.ipynb`).**
+- *Lead's verification (independent of the implementers):*
+  - `tests/test_m2_verify.py` with the naive reference `tests/m2_reference.py` (written from PLAN §6 without reading the implementers' code). Known answers: identical shapes give 0; a sign flip gives d² = 4A², ρ = −1, SA = 0, nd² = 4; a difference beyond the data is invisible, and one confined to the top cell gives exactly δ²ω(1 − ω); step functions with different bin edges, or with a centring offset, give identical shapes; `drift_pair` matches the reference to 1e-9.
+  - `scripts/verify_floor_synthetic.py`: real EBM fits (prereg settings) on a stationary synthetic process, 48 windows, 1,440 fits. Implementation agrees with the reference to 1e-15. At Δ = 12: DR = 1.11 [0.93, 1.24] (regression target), 0.83 [0.72, 1.08] (weak-signal classifier). At Δ < 12, DR_adj is well above 1 (1.4–2.3): shifting a window by a month moves an early-stopped EBM more than its 1/12 data turnover predicts. Short-lag γ therefore has to be read against the surrogate's γ at the same Δ (PLAN §9.3).
+  - Kill-and-resume on the real grid (`scripts/kill_resume_trial.py`): hard kill of the process tree after 151 s. No partial or temporary files, no surviving processes, no fit appeared or vanished after the kill; the restart skipped all 467 finished fits. **16 fits were lost** (one per busy worker), which is the design bound but one more than the pre-registered "fewer than 16": criterion 1 fails by one.
+- *Go / no-go (PLAN §13 M2):*
+  1. End-to-end run with resume: passes except the strict count (16 lost, criterion says < 16).
+  2. **G0 fails, and so does the DR* fallback.** Median DR_tot at Δ = 12 (n = 71, 95% CI): shuffled 0.44 [0.28, 0.60]; surrogate dir 0.64 [0.49, 1.03]; surrogate vol 1.25 [1.15, 1.34]. DR*: shuffled 0.69 [0.44, 0.94]; surrogate dir CI [0.77, 1.61]; surrogate vol [0.92, 1.07].
+  3. Positive control passes: 8 features with median vol SNR > 4 (hour 17.1, range_1h 16.5, qv_z_1h 12.6, dow 11.0, rv_ratio_4h 9.4, rv_ratio_24h 8.4, rv_level_pct 6.2, pos_range_168h 4.6); vol OOS R² > 0 in 83 of 83 months, median 0.35. Direction skill is about 0 (median log-loss skill 0.002), the shuffled control 0.000.
+  4. Wall time passes: 0.64 h against 0.53 h (ratio 1.21).
+- *Diagnosis of the G0 failure (control arms only).* The full-window fits behave as σ²/n estimators: on the shuffled target the cross-window distance at Δ = 12 is about twice the fitted-noise amplitude A² of a full fit, as theory says. The half-sample floor does not: half-sample fits carry 4.6× (not 2×) the full fit's noise amplitude, and σ²_tot is 2.8× A²_full (theory: 1). Boosting rounds do not shrink with n (≈ 2,800 for classifiers, ≈ 9,700 for regressors, half and full alike), so with half the rows an EBM fits disproportionately more noise per bin. The PLAN §6.4 argument that half-samples reproduce σ²/n holds only for smooth estimators, as §9.3 warned. Where signal dominates (surrogate vol) the bias reverses, which is why a single DR* rescaling cannot fix both.
+- *Consequence (PLAN §2):* the floor must be fixed before any real-target drift result is looked at. Real-target γ(Δ), DR over time, per-feature DR and the shape gallery are withheld from the notebook. **Disclosure:** a summary printout during the run also showed the real dir and vol γ medians to the lead; they have not been interpreted or used.
+- The seed share is about 2% for every target, but it is σ²_seed / σ²_tot with the inflated σ²_tot, so it is not interpretable either until the floor is fixed.
+- *Re-timed compute (PLAN §11.4):* mean single-thread fit 4.3 s (classifier, full window), 3.3 s (classifier, half-sample), 8.2 s (regressor, full), 7.5 s (regressor, half): 1.4–1.9× the synthetic timings of §11.1, because real data runs more boosting rounds. The 16 loky workers deliver 14.1 effective cores, not 10.5, so wall time grows only 1.2×. Tier 1 EBM arms: about 1.2× the §11.2 figures.

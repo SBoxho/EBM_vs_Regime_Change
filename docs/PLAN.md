@@ -659,6 +659,7 @@ The timing runs used 16 synthetic features, the same count as the revised featur
 
 - The timings are on synthetic data and short bursts. Real features (ties, heavy tails) change the number of boosting rounds, and multi-hour runs throttle.
 - M2 re-times one real window and updates this table before the full grid is launched.
+- **Re-timed at M2 (2026-11-17, D-54):** real-data EBM fits take 1.4–1.9× the synthetic times above (more boosting rounds: about 2,800 for the classifier, 9,700 for the regressor), but 16 loky workers deliver about 14 effective cores instead of 10.5. Net: the BTC slice took 0.64 wall-hours against the 0.53 h estimate (1.2×); scale the EBM rows of §11.2 by about 1.2.
 
 ---
 
