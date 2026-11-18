@@ -390,3 +390,94 @@ Implemented by five sub-agents (models, runner, explain, stability metrics, surr
 - *Consequence (PLAN §2):* the floor must be fixed before any real-target drift result is looked at. Real-target γ(Δ), DR over time, per-feature DR and the shape gallery are withheld from the notebook. **Disclosure:** a summary printout during the run also showed the real dir and vol γ medians to the lead; they have not been interpreted or used.
 - The seed share is about 2% for every target, but it is σ²_seed / σ²_tot with the inflated σ²_tot, so it is not interpretable either until the floor is fixed.
 - *Re-timed compute (PLAN §11.4):* mean single-thread fit 4.3 s (classifier, full window), 3.3 s (classifier, half-sample), 8.2 s (regressor, full), 7.5 s (regressor, half): 1.4–1.9× the synthetic timings of §11.1, because real data runs more boosting rounds. The 16 loky workers deliver 14.1 effective cores, not 10.5, so wall time grows only 1.2×. Tier 1 EBM arms: about 1.2× the §11.2 figures.
+
+---
+
+## Fixing the noise floor (2026-11-17)
+
+**D-55. DEVIATION (pre-specified before any result): candidate replacements for the half-sample floor, tested on control arms only, with a fixed adoption rule.** Written before any candidate was fitted.
+- *Why:* G0 and its DR* fallback failed (D-54). Half-sample fits carry 4.6× (not 2×) the full fit's fitted noise, so the floor is inflated on noise-dominated shapes. PLAN §2 requires the floor to be fixed before any real-target drift result is looked at.
+- *What stays unchanged:* the full-window seed-only fits (protocol i) and the cross-window distance d̄²_cross, the cells, the metrics, the targets, G0's statistic and band. Only σ²_tot,j (the denominator of DR) is replaced.
+- *Candidate B, full-n stationary bootstrap (the pre-registered protocol ii, used as the floor):* 10 fits per window. Each draws stationary-bootstrap replication counts over the pre-tail training rows (mean block 168 h, the prereg block length) with a fresh model seed; each of the 14 outer bags uses the counts on its own time-ordered 85% of blocks; validation tail −1. Rows drawn 0 times are 0 in every bag and are dropped before `fit` (D-45). σ²_B,j = ½ · mean over replicate pairs of d²_j.
+- *Candidate R, rate-corrected disjoint subsampling:* per window, 4 random partitions of the 168-h blocks into 2 disjoint halves (8 fits) and 2 random partitions into 4 disjoint quarters (8 fits); pre-tail and validation-tail blocks are partitioned separately, so every part has its own tail; fresh model seed per fit. Only fits from the same partition are paired, so paired fits share no rows. V2,j = ½ · mean over disjoint half pairs of d²_j and V4,j likewise for quarters. The convergence rate per window, pooled over features: β = log2(Σ_j V4,j / Σ_j V2,j). Floor at full n: σ²_R,j = V2,j · 2^(−β).
+- *Evaluation:* on the three control arms only (real `shuf`, `surrogate:0` dir, `surrogate:0` vol), for BTCUSDT: median DR_tot at Δ = 12 over the 71 zero-overlap pairs, with the pre-registered 95% stationary-bootstrap CI. DR_tot = Σ_j d̄²_cross,j / Σ_j (σ²_a,j + σ²_b,j), every quantity computed on the pair's X_ref as before.
+- *Adoption rule:* a candidate passes if its CI lies inside [0.8, 1.25] on all three arms. If exactly one passes, adopt it. If both pass, adopt the one with the smaller max over arms of |log median DR|. If neither passes, stop and report; no further candidate is tried without the user's decision.
+- *Scope of the deviation:* the adopted floor replaces protocol (iii) in DR, DR_adj (σ²_samp = max(0, σ² − σ²_seed)), SNR, the seed share and the sign-agreement noise SD, for all primary analyses. Whether H1–H5 keep confirmatory status is the user's decision, recorded in a later entry.
+- *Implementation:* `src/ebmregime/floorexp.py` (resampling) and `scripts/floor_experiment.py` (fits and evaluation), kept outside the fit-code hash of the runner so that the 6,225 cached slice fits stay valid during the experiment. If a candidate is adopted, it moves into `splits/` and the runner before M3.
+
+**D-56. Floor-fix result (D-55): neither candidate passes; stopped per the adoption rule.** 6,474 candidate fits on the control arms (89 min wall, 0 errors; `data/cache/floor_exp/31eb6e7c1d9e`), evaluated by `scripts/floor_experiment.py eval` (`results/floor_exp/`). Real dir and vol targets were not touched.
+- *G0 at Δ = 12 (median DR_tot over 71 zero-overlap pairs, 95% CI; band [0.8, 1.25]):*
+
+  | arm | (iii) half-sample | B bootstrap | R rate-corrected |
+  |---|---|---|---|
+  | real shuf | 0.44 [0.28, 0.60] | 1.11 [0.78, 1.44] | 0.44 [0.24, 0.53] |
+  | surrogate dir | 0.64 [0.49, 1.03] | 2.14 [1.25, 2.27] | 0.49 [0.39, 0.86] |
+  | surrogate vol | 1.25 [1.15, 1.34] | 1.62 [1.58, 1.80] | 0.73 [0.67, 0.89] |
+
+- *B* is about right where there is no signal (shuf: median 1.11, though the CI's upper end is 1.44), but too small where there is signal (surrogate dir 2.1, vol 1.6). The bootstrap replicates vary less than independent windows do. One possible cause, not tested: every replicate keeps the same validation tail, so early stopping is correlated across replicates.
+- *R* overstates the floor on every arm. The per-window rate β = log2(ΣV4/ΣV2) is very noisy: 10th–90th percentile −0.54 to 3.17 (shuf), −1.50 to 2.94 (dir), −0.27 to 0.74 (vol). For the vol regressor it is about 0 (median 0.09): quarter-sample fits are barely noisier than half-sample fits, so the rate cannot be extrapolated to full n.
+- *Status:* G0 is still unmet. The real-target drift results stay withheld. No further candidate is tried without the user's decision (D-55).
+
+**D-57. DEVIATION (pre-specified before any new surrogate is fitted and before any real dir or vol drift result is examined): a surrogate-referenced floor replaces the within-window floor.** The user chose this route after D-56.
+- *Why:* three within-window floors (half-sample, bootstrap, rate-corrected subsamples) failed in different directions (D-54, D-56). An early-stopped boosted EBM is not a smooth σ²/n estimator, so a resampling scheme inside one window does not predict how far two independent windows' shapes lie apart. A stationary surrogate runs the exact pipeline on data without regime change, so its cross-window distance contains every source of fit-to-fit variation (seeds, early stopping on the tail, binning, sample composition). This is the standard surrogate-data test.
+- *Surrogates:* BTCUSDT, h = 8, indices 0–19 (20 in total; prereg `surrogates.per_symbol` was 3), generated by the frozen generator (`stability/surrogate.py`, mean block 252 h, prereg seed stream). Per surrogate and target (dir, vol, shuf): the 5 seed-only fits per window (protocol i, prereg replicate seeds), 83 windows. Half-sample fits are not needed. Surrogate 0's existing dir and vol fits are reused.
+- *Statistic, per data set D (real or surrogate s), target and pair (τa, τb) at lag Δ:* g_D,j = d̄²_cross,j and G_D = Σ_j g_D,j, computed exactly as in the slice (pair X_ref, 50 cells, re-centred shapes, the seed-only fits of both windows). The seed term is S_D = Σ_j (σ²_seed,a,j + σ²_seed,b,j).
+  - DR_sur(pair) = G_real / mean_s G_s; per feature, DR_sur,j = g_real,j / mean_s g_s,j. The adjusted version is DR_sur,adj = (G_real − S_real) / mean_s (G_s − S_s).
+  - Summary at each Δ: the median over pairs with the prereg 95% stationary-bootstrap CI (as G0).
+  - Rank test: T_D(Δ) = median over pairs of G_D; one-sided p = (1 + #{s : T_s ≥ T_real}) / 21.
+  - At Δ < 12 the surrogate has the same window overlap as the real data, so short-lag γ needs no separate correction.
+  - The per-window SNR becomes A²_j(τ) / σ²_sur,j(τ), with σ²_sur,j(τ) = ½ · the mean over surrogates and over the Δ = 12 pairs containing τ of g_s,j. A² comes from the window's own cells, the floor from the pair cells; this mismatch is accepted.
+- *Checks; real dir and vol drift is computed only if (a), (b) and (c) all pass:*
+  - (a) *Calibration, leave one surrogate out.* For each s in 0–19 and each target in {dir, vol}, compute DR_sur of surrogate s against the other 19. Passes if, for each target, (i) the median over s of the held-out median DR_sur at Δ = 12 lies in [0.9, 1.11], and (ii) at least 18 of the 20 held-out 95% CIs contain 1. Reported at every lag.
+  - (b) *Negative control on real data (replaces G0).* Real `shuf`, referenced to `shuf` on all 20 surrogates. Passes if the 95% CI of the median DR_sur at Δ = 12 lies inside [0.8, 1.25] (the frozen G0 band).
+  - (c) *Power, synthetic planted break.* The stationary synthetic process of `scripts/verify_floor_synthetic.py`, lengthened to 2019-01 to 2026-01 (vol target, 72 windows, τ from 2020-01 to 2025-12), with a break at 2022-07-01: the `rv_level_pct` effect flips sign (+0.3x to −0.3x, the strong change) and the `rv_ratio_4h` effect halves (0.4 tanh to 0.2 tanh, the moderate change). Every other feature is unchanged. 9 surrogates of the synthetic panel come from the same generator (252 h). Fits are the 5 seed-only fits per window. The "opposite-side" pairs are those at Δ ∈ {12, 24} whose two windows lie on opposite sides of the break, neither containing it. Passes if, on the opposite-side pairs, the 95% CI lower bound of the median DR_sur,j for `rv_level_pct` is above 1.25 (the H1 threshold) and that of DR_sur,tot is above 1.
+  - Reported, not gating: the moderate feature on the opposite-side pairs; the unchanged features; same-side pairs at Δ = 12. The surrogate of a series with a break mixes both regimes, so its windows vary more than either regime alone. The reference is therefore conservative under real non-stationarity, and the same-side pairs measure how conservative.
+- *Exploratory, not eligible for adoption:* bootstrap floor B with a resampled validation tail ("B-tail"). Tail rows are repeated according to stationary-bootstrap counts (mean block 168 h) drawn over the tail, every copy is −1 in all bags, and training rows are as in B. 10 fits per window on the three control arms; median DR at Δ = 12 is reported against the D-56 table. This tests whether B's under-dispersion comes from the shared tail (D-56). It cannot replace D-57.
+- *Later sensitivity check (not run now):* the surrogate mean block at 1 and 3 months (720 h, 2,160 h), 9 surrogates each, dir and vol.
+- *Scope:* if the checks pass, DR_sur replaces DR wherever PLAN uses DR (γ(Δ), DR over time, H1 thresholds, SNR, the seed share). The 252-h surrogate defines "no regime change": the claim is drift beyond a stationary process with dependence up to about 10 days. Whether H1–H5 stay confirmatory (under an amended pre-registration with disclosed deviations) is the user's decision.
+- *Code:* lead-owned `src/ebmregime/surfloor.py` and `scripts/surrogate_floor.py`, outside the fit-code hash; fits run through the runner cache.
+
+**D-58. DEVIATION (written before any surrogate result was computed): the D-57 gates use the surrogates' own null distribution, not the bootstrap CI.**
+- *Finding (simulation only, no project data):* the prereg CI for a median (stationary bootstrap, block floor max(3, Δ), percentile) under-covers badly on the lag-12 pair series:
+  - Two pairs share a window up to 2Δ = 24 months apart, so 71 pairs from 95 months carry about 4 independent pieces of information.
+  - `scripts/ci_coverage_sim.py` builds the same overlap structure: 30-dimensional monthly shocks, 12-month window means, pair G = squared distance, ratio to the mean of 20 independent references, 200 replications. 95% intervals covered the true median 76% of the time with the prereg block and 70% with the pre-registered sensitivity block (×2).
+  - On i.i.d. series the coverage was 90% (n = 71); on AR(0.9) series it was 69%.
+  - Under the null, the median of a ratio of skewed distances also sits slightly below 1 (0.96–0.985 in these simulations).
+  - So D-57 gate (a)(ii) ("at least 18 of 20 CIs contain 1") would test the bootstrap, not the floor. The prereg CIs of G0 and H1 are too narrow in general (anti-conservative). Fixing that for H1–H5 is the user's decision; this entry changes only the D-57 gates.
+- *Null distribution:* m = median over pairs of DR_sur. For each surrogate s, m_s is the median of surrogate s's DR_sur against the other 19 (leave one out). The 20 values m_s form the null distribution of m, already including its small downward bias. Inference compares an observed m with them, and does not need a bootstrap.
+- *Revised gates (replace D-57 (a)–(c); the bootstrap CIs are still reported alongside):*
+  - (a) For dir and vol at Δ = 12, the median of the 20 m_s lies in [0.9, 1.11] (D-57 (a)(i), kept). (a)(ii) is dropped: coverage by exchangeable held-out surrogates is guaranteed by construction, so it tests nothing.
+  - (b) Real `shuf` at Δ = 12, against `shuf` on all 20 surrogates. Three conditions must all hold:
+    1. m_real lies within [min, max] of the 20 shuf m_s (two-sided rank test, size about 2/21);
+    2. m_real lies in [0.8, 1.25];
+    3. precision: the 2.5% and 97.5% empirical quantiles of the 20 shuf m_s lie within [0.8, 1.25], which is the analogue of "CI inside the band".
+  - (c) Synthetic break, opposite-side pairs. The null values are the leave-one-out m of the 9 synthetic surrogates (each against the other 8) on the same pairs. The strong feature's m must exceed both 1.25 and the largest null value, and the total m must exceed both 1 and the largest null value.
+- *For later analyses (proposal, the user's decision):* H1-type inference by the same rank comparison against held-out surrogates, which needs more surrogates per symbol (39 for a one-sided 2.5% test).
+
+**D-59. Surrogate-floor result (D-57/D-58): checks (a) and (b) fail; the surrogate generator leaks training rows into the validation tail.** 24,070 seed-only fits on surrogates 0–19 (0 errors), 34,282 control pairs (`results/surfloor/`). Real dir and vol drift not computed.
+- *Gate (a), calibration (m = median over the 71 lag-12 pairs of DR_sur, leave one surrogate out):*
+  - vol: median of the 20 m_s = 0.96 (2.5–97.5%: 0.81–1.14). Passes.
+  - dir: median of the 20 m_s = 0.48 (0.31–1.21). Fails.
+  - Across lags, vol m_s rises from 0.64 (Δ = 1) to about 0.97 (Δ ≥ 12); dir stays at 0.34–0.53.
+- *Gate (b), real shuf against 20 surrogates:* m_real = 0.17, below every null value (null 0.21–1.63, median 0.36), outside the band, and the null is far wider than [0.8, 1.25]. Fails. The pattern holds at every lag.
+- *Diagnosis (control arms only, `scripts/surrogate_leakage_diag.py`):*
+  - Across surrogates, classifier distances are extremely heavy-tailed. At a given pair, the largest surrogate distance is typically 10× the median (90th percentile 26× for dir, 51× for shuf); for vol it is 1.9×.
+  - Real shuf's median distance (0.0054) lies below every surrogate's (0.0060–0.031). Every feature is affected.
+  - *Cause:* the surrogate draws 252-h blocks with replacement from the whole 8-year range. A 12-month window's validation tail can therefore contain source rows that also sit in its training part, or within 8 h of them (overlapping 8-h labels). Every surrogate window has some such tail rows (median 7% of the tail). Real windows have none, because of the purge.
+  - Early stopping on a tail that repeats training rows rewards memorising: when more than 30% of the tail is near-duplicate, boosting rounds rise (3,270 against 2,820) and the lag-12 distance is 3–9× larger. With little leakage (under 10%), surrogate shuf distances are 1.2–2× real shuf.
+  - The noise-dominated classifiers are hit hardest; the signal-dominated vol regressor much less (rank correlation of leakage with distance: 0.36 shuf, 0.43 dir, 0.20 vol).
+- *Consequences:*
+  - (i) The frozen surrogate is not a valid null for early-stopped fits. Its windows are leakier than real windows by construction.
+  - (ii) This also contaminates every earlier surrogate-arm result: G0's surrogate arms (D-54) and candidates B and R on the surrogate arms (D-56). On the one uncontaminated control, real shuf, candidate B gave 1.11 [0.78, 1.44].
+  - (iii) Gate (a) for vol passing shows the leave-one-out machinery works where leakage matters little.
+- *Status:* stopped. No new surrogate generator or floor is tried without the user's decision. Checks (c) and the exploratory B-tail run as pre-specified and are reported when done; (c) uses the same with-replacement generator on synthetic data.
+- *Check (c), power on the synthetic break (3,600 fits, `results/surfloor/check_c_power.csv`): passes.*
+  - On the 14 opposite-side pairs, the strong change gives m = 30.9 for `rv_level_pct` (null max 3.2) and 6.3 in total (null max 1.28).
+  - The moderate change (`rv_ratio_4h` effect halved) is also detected: 1.84 against a null max of 1.47.
+  - The unchanged features give 0.23–1.24, every one below its null max.
+  - On the 37 same-side pairs, total m = 0.72 (null 0.80–1.17): the reference is conservative, as expected for surrogates that mix both regimes and, here, also leak. One of the 16 features (`taker_imb_4h`, 1.44) exceeds its null max of 1.25, consistent with a 9-surrogate null.
+  - The method has power, but this check does not rescue (a) and (b).
+- *Exploratory B-tail (2,490 fits, `results/floor_exp/g0_Btail.csv`; not eligible for adoption):* median DR at Δ = 12 is 0.44 [0.35, 0.69] for real shuf, 1.06 [0.70, 1.24] for surrogate dir and 1.39 [1.30, 1.45] for surrogate vol.
+  - Resampling the validation tail makes the replicates much noisier: on real shuf the floor grows about 2.5× over B, which gave 1.11.
+  - The tail realisation that early stopping sees is a large source of fit-to-fit variation. A fixed tail understates it; a bootstrapped tail with repeated rows overstates it.
+  - The surrogate-arm numbers carry the D-59 leakage and are not interpreted.
