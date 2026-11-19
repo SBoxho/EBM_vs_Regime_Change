@@ -481,3 +481,74 @@ Implemented by five sub-agents (models, runner, explain, stability metrics, surr
   - Resampling the validation tail makes the replicates much noisier: on real shuf the floor grows about 2.5× over B, which gave 1.11.
   - The tail realisation that early stopping sees is a large source of fit-to-fit variation. A fixed tail understates it; a bootstrapped tail with repeated rows overstates it.
   - The surrogate-arm numbers carry the D-59 leakage and are not interpreted.
+
+**D-60. DEVIATION (pre-specified before any fit with it): a leakage-free block-permutation surrogate replaces the with-replacement surrogate for the D-57/D-58 checks.** The user approved the rebuild after D-59.
+- *Generator ("perm"):* the rows with `start <= ts < end` (as in D-50; BTCUSDT `[2018-12-01, 2026-11-01)`) are cut into consecutive source blocks. Block lengths are geometric with mean 252 rows (the prereg mean block), drawn until the range is covered, with the last block truncated. The blocks are put in a uniformly random order without replacement and laid end to end on the original timestamps, so every source row appears exactly once.
+  - *Purge:* for every block except the one that ends at the end of the range, all `y_*_h{H}` targets of its last H source rows are set to NaN (H = 8 and 24), so no label window reaches into another block. In the synthetic check (c) the same rule applies to `y_vol` with H = 8.
+  - Seed: `stable_seed(prereg.surrogates.seed, symbol, "perm_surrogate", i)`; synthetic `"SYNTH_BREAK"`, `"perm_surrogate"`, i.
+  - *Property:* no validation-tail row of any window is within H source rows of a training row from another block. A unit test asserts this.
+- *Fits:* surrogates perm:0–19, targets dir, vol and shuf, 5 seed-only fits per window (prereg replicate seeds), all 83 windows. They run through the unchanged runner fit function (`execute.run_fit_job`) with the surrogate panel swapped for the perm panel, in a separate cache (`data/cache/fits_perm`). The key is the normal key with the code hash extended by the perm module's hash. The frozen runner files, and so the cached real and slice fits, are unchanged.
+- *Statistic, checks and gates:* identical to D-57 as amended by D-58: (a) calibration for dir and vol, (b) real shuf against the 20 shuf surrogates, (c) power on the synthetic break with 9 perm surrogates of the synthetic panel. Real dir and vol drift is computed only if all three pass. The leakage diagnostic of D-59 is rerun on the perm surrogates.
+- *Not run now:* re-testing candidate B against the perm surrogates (exploratory only, D-59 (ii)) and the block-length sensitivity check (D-57).
+
+**D-61. Perm-surrogate result (D-60): leakage removed, real shuf now exchangeable with the null, but gates (a) and (b) still fail as written; (c) passes.** 24,898 seed-only fits (0 errors), 34,282 pairs, 3,590 synthetic fits (`results/surfloor/perm_*`). Real dir and vol drift not computed.
+- *Leakage, corrected measure* (`surfloor_perm.leakage`; all 20 surrogates × 83 windows × 3 targets):
+  - The measure counts tail rows that copy a fitted training row, or share label hours with one (fewer than H source rows apart). Fitted rows exclude those purged before the tail, and the tail start is computed as in the fit.
+  - perm generator: no leakage in any window.
+  - Frozen generator: duplicates in 71% of windows; label overlap in 72%, median 6.6% of the tail, up to 70%.
+  - *Correction to D-59:* its diagnostic also counted the window's own purged boundary rows, so "every surrogate window" and "median 7%" are replaced by these figures. The conclusions of D-59 stand.
+- *Fit cost:* the perm fits used 133k CPU-seconds against 472k for the frozen generator's: leaky tails made early stopping run longer.
+- *Gate (a), lag 12, median of the 20 leave-one-out m_s:*
+  - vol: 0.96 (2.5–97.5%: 0.84–1.15). Passes.
+  - dir: 0.73 (0.41–1.03). Fails; it was 0.48 with the frozen generator.
+- *Gate (b), real shuf:*
+  - m_real = 0.44, inside the null range 0.29–0.93 (rank 13 of 21; ranks 12–18 at every lag; with the frozen generator it was below every null value). So condition 1 passes.
+  - Conditions 2 (in [0.8, 1.25]) and 3 (null 2.5–97.5% inside the band) fail.
+- *Why the gates still fail:* across surrogates, classifier distances remain right-skewed. At a given pair the largest surrogate distance is 5–7× the median (frozen generator: 10–12×), and the mean is 1.4–1.7× the median (vol: 1.02).
+  - DR_sur divides by the surrogates' mean, so every classifier ratio, the null's included, centres well below 1 (shuf null median 0.53). The fixed bands of D-58 assumed a centre near 1.
+  - Real shuf / median surrogate = 0.83. This is a property of the statistic, not of the null.
+  - The classifier null is also wide (factor about 3 between its 2.5% and 97.5% quantiles): with 5 seed fits and 12-month windows, drift in noise-dominated shapes is imprecise.
+- *Gate (c), power on the synthetic break:* passes.
+  - Strong change: m = 26.2 (null max 3.4). Total: 7.3 (null max 1.32). Moderate change: 2.31 (null max 1.76).
+  - No unchanged feature on the opposite-side pairs exceeds its null max; 1 of 17 on the same-side pairs does.
+- *Status:* stopped; the gates are not changed without the user's decision. Any change now would be made after seeing control-arm results only (real dir and vol never computed).
+
+**D-62. DEVIATION (pre-specified after the control-arm results of D-61 and before any real dir or vol drift result): the D-58 gates use a pooled rank statistic and a median-referenced ratio.** The user approved amending the gates after D-61.
+- *Why:* D-61 showed that the gates failed because of the statistic, not the null. Classifier distances are right-skewed across surrogates, so a ratio to the surrogates' *mean* centres below 1 even on exchangeable data. A rank is free of this bias, and a ratio to the *median* is robust to it. The frozen G0 fallback already referenced the median surrogate (`hypotheses.g0.fallback`).
+- *Disclosure:* this is chosen after seeing control-arm results only. Known before writing: real shuf / median surrogate ≈ 0.83 at Δ = 12 (D-61), and real shuf ranks 12–18 of 21 at every lag. Not known: any of the statistics below for dir, vol or the synthetic break, and every real dir or vol result.
+- *Pool:* the data sets compared together. Calibration (a) and precision (d): the 20 perm surrogates. Real targets (b) and later: real plus the 20 perm surrogates (21). Power (c): the synthetic panel plus its 9 perm surrogates (10).
+- *Statistic, for each data set D in a pool, target and lag Δ* (G = Σ_j g_j as in D-57; per feature, g_j in place of G):
+  - Per pair p: u_D(p) = (#{E ≠ D : G_E(p) < G_D(p)} + ½ #{ties}) / (k − 1), with k the pool size, the mid-rank of D among the other members. r_D(p) = G_D(p) / median_{E ≠ D} G_E(p).
+  - Ū_D = mean over pairs of u_D(p) (rank statistic; 0.5 in expectation under exchangeability). M_D = median over pairs of r_D(p) (effect size, "DR_med").
+  - Every member is referenced to the other k − 1, so under the null (no drift beyond the surrogate) all k values are exchangeable. The test of D is exact: p_upper = #{E : Ū_E ≥ Ū_D} / k, rank from the top among the k.
+  - Seed-adjusted versions (G − S) are reported, not gating. The prereg bootstrap CI is no longer reported (D-58: it under-covers).
+- *Gates (replace D-58 (a)–(c); real dir and vol drift is computed only if (a), (b) and (c) all pass):*
+  - (a) *Calibration.* For dir and vol at Δ = 12, the median of the 20 surrogate M_s lies in [0.9, 1.11] (band unchanged). The rank statistic needs no calibration check: its centre is exact by construction.
+  - (b) *Negative control.* Real shuf in the 21-member shuf pool at Δ = 12. Passes if (1) Ū_real lies within [min, max] of the 20 surrogates' Ū (two-sided rank test, size about 2/21) and (2) M_real lies in [0.8, 1.25] (band unchanged).
+  - (c) *Power.* Synthetic break, opposite-side pairs, 10-member pool. Passes if, for `rv_level_pct` and for the total, the synthetic panel's Ū is the largest of the 10, and M_synth exceeds both the largest surrogate M and the threshold (1.25 for `rv_level_pct`, 1 for the total).
+- *Precision (d), per target, not a stop rule:* a target is precise if the 2.5% and 97.5% quantiles of its 20 surrogate M_s at Δ = 12 lie within [0.8, 1.25] (D-58 (b)(3), moved from shuf to each target). A target that is not precise cannot separate drift of 1.25 from the null. Its later drift results are exploratory, reported with its null range. Real shuf's precision is reported.
+- *Reported, not gating:* every lag, the seed-adjusted versions, and per-feature Ū and M; for (c), the moderate feature, the unchanged features and the same-side pairs, as in D-57.
+- *Scope:* for later analyses, M replaces DR_sur as the effect size and the pooled rank replaces the bootstrap CI for inference. With 21 members, the smallest attainable one-sided p is 1/21 ≈ 0.048. Whether H1–H5 stay confirmatory, and whether more surrogates are fitted for a finer p (D-58), is the user's decision.
+- *Code:* `surfloor.pooled_stats`, `check_calibration_rank`, `check_negative_control_rank`, `surfloor_power.summarise_rank`; outputs `results/surfloor/perm_rank_*`. The D-58 functions and outputs stay as they are.
+
+**D-63. Amended-gate result (D-62): gates (a), (b) and (c) pass; vol is precise, dir is not.** Computed on the stored perm pairs of D-61 (no new fits; `scripts/surrogate_floor.py check-rank`, `results/surfloor/perm_rank_*`). The D-62 text was hashed before this run (sha256 `715587149a37…`, 2026-11-19T06:08Z). Real dir and vol drift not computed.
+- *Gate (a), Δ = 12, median of the 20 surrogate M_s:* dir 1.05, vol 0.98. Both pass. Every lag lies in 0.94–1.06 for every target.
+- *Precision (d), 2.5–97.5% of the 20 surrogate M_s at Δ = 12:*
+  - vol: 0.87–1.17. Precise.
+  - dir: 0.62–1.53. Not precise, so dir drift results are exploratory.
+  - shuf: 0.53–1.78. Not precise.
+- *Gate (b), real shuf in the 21-member pool, Δ = 12:* passes.
+  - Ū_real = 0.49, within the surrogates' 0.40–0.61. Rank 12 of 21 (p_upper = 0.57).
+  - M_real = 0.83, in [0.8, 1.25] (known approximately before D-62, as disclosed there).
+  - At every lag, real shuf ranks 11–19 of 21. M_real is 0.72–0.87, below the surrogate median at every lag, but always inside the surrogate range.
+- *Gate (c), synthetic break, opposite-side pairs, 10-member pool:* passes.
+  - Strong change: Ū = 1 (rank 1); M = 52.5 against a surrogate max of 4.0.
+  - Total: Ū = 1 (rank 1); M = 8.3 against 1.43.
+  - Moderate change: rank 1; M = 2.57 against 2.00.
+  - The 14 unchanged features: none ranks first by Ū; one (`pos_range_168h`, M = 2.42 against 2.28) exceeds its surrogate max by M.
+- *Caveat on per-feature results, same-side pairs (Δ = 12, 37 pairs, no change inside any pair):*
+  - Total: rank 10 of 10, M = 0.73 below the surrogate min of 0.80. The reference is conservative, as D-57 expected.
+  - But 5 of the 16 features rank first by Ū (chance: about 1.6), each only just above the surrogate max (Ū 0.61–0.66 against 0.60–0.65). By M, 1 of 16 does (`taker_imb_4h`).
+  - So per-feature rank results can flag unchanged features when the real series has a regime change elsewhere. A plausible cause: surrogates that mix regimes fit a weaker main effect, which changes early stopping and so the noise in every other shape. This is one synthetic series and is not tested further.
+  - Per-feature Ū results on real data are therefore exploratory, reported with M.
+- *Status:* by D-62, real dir and vol drift may now be computed (`scripts/surrogate_floor.py real-rank`; every real seed fit is already cached). It has not been run. vol is eligible for confirmatory status; dir is exploratory by (d). Whether H1–H5 stay confirmatory is the user's decision.

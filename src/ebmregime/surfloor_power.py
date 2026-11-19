@@ -76,8 +76,12 @@ def make_break_process(seed: int = 7) -> pd.DataFrame:
     return df
 
 
+GEN = "replace"          # "replace" (frozen generator, D-57) or "perm" (D-60); set by cmd_power
+
+
 def data_sets() -> list[str]:
-    return ["synth"] + [f"sur:{i}" for i in range(N_SUR)]
+    tag = "sur" if GEN == "replace" else "perm"
+    return ["synth"] + [f"{tag}:{i}" for i in range(N_SUR)]
 
 
 @lru_cache(maxsize=2)
@@ -85,12 +89,18 @@ def panel_of(data: str) -> pd.DataFrame:
     base = make_break_process()
     if data == "synth":
         return base
+    pr = load_config("prereg")
+    kind, i = data.split(":")
+    mb = float(pr["surrogates"]["mean_block_hours"])
+    if kind == "perm":
+        from .surfloor_perm import make_perm_surrogate
+
+        seed = stable_seed(int(pr["surrogates"]["seed"]), "SYNTH_BREAK", "perm_surrogate", int(i))
+        return make_perm_surrogate(base, START, END, mb, seed, purge={"y_vol": H})
     from .stability.surrogate import make_surrogate
 
-    i = int(data.split(":")[1])
-    pr = load_config("prereg")
-    seed = stable_seed(int(pr["surrogates"]["seed"]), "SYNTH_BREAK", "surrogate", i)
-    return make_surrogate(base, START, END, float(pr["surrogates"]["mean_block_hours"]), seed)
+    seed = stable_seed(int(pr["surrogates"]["seed"]), "SYNTH_BREAK", "surrogate", int(i))
+    return make_surrogate(base, START, END, mb, seed)
 
 
 def taus():
@@ -112,7 +122,7 @@ def fit_task(data, tau, rep, prereg):
         return None
     v = prereg["validation"]
     df = panel_of(data)
-    tm = train_mask(df.index, tau, 12, H)
+    tm = train_mask(df.index, tau, 12, H, df["y_vol"].notna().to_numpy())
     ts_tr = df.index[tm]
     X = df.loc[tm, P.feature_names()]
     y = df.loc[tm, "y_vol"].to_numpy()
@@ -126,7 +136,7 @@ def fit_task(data, tau, rep, prereg):
 
 
 def _fit_rows(df, tau, tail_frac):
-    tm = train_mask(df.index, tau, 12, H)
+    tm = train_mask(df.index, tau, 12, H, df["y_vol"].notna().to_numpy())
     pos = np.flatnonzero(tm)
     keep = ~P.purged_before_tail(df.index[pos], H, tail_frac)
     out = np.zeros(len(df), bool)
@@ -158,7 +168,9 @@ def pair_task(data, a, b, lag, prereg):
             for j, nm in enumerate(P.feature_names())]
 
 
-def cmd_power(workers: int):
+def cmd_power(workers: int, gen: str = "replace"):
+    global GEN
+    GEN = gen
     from joblib import Parallel, delayed
 
     prereg = load_config("prereg")
@@ -174,9 +186,13 @@ def cmd_power(workers: int):
     res = Parallel(n_jobs=workers, backend="loky", batch_size=4, verbose=2)(ptasks)
     pf = pd.DataFrame([r for rr in res for r in rr])
     OUT.mkdir(parents=True, exist_ok=True)
-    pf.to_parquet(OUT / "power_pairs.parquet")
+    pf.to_parquet(OUT / f"{_pfx()}power_pairs.parquet")
 
     return summarise(pf)
+
+
+def _pfx() -> str:
+    return "" if GEN == "replace" else "perm_"
 
 
 def summarise(pf: pd.DataFrame) -> dict:
@@ -209,7 +225,7 @@ def summarise(pf: pd.DataFrame) -> dict:
                          "null_max": float(null.max()), "null_median": float(np.median(null)),
                          "null_min": float(null.min()), "boot_lo": ci["lo"], "boot_hi": ci["hi"]})
     out = pd.DataFrame(rows)
-    out.to_csv(OUT / "check_c_power.csv", index=False)
+    out.to_csv(OUT / f"{_pfx()}check_c_power.csv", index=False)
     opp = out[out.side == "opposite"].set_index("feature")
     st, to = opp.loc[STRONG], opp.loc["TOTAL"]
     gate = {"strong_m": float(st.m), "strong_null_max": float(st.null_max), "total_m": float(to.m),
@@ -218,5 +234,5 @@ def summarise(pf: pd.DataFrame) -> dict:
     gate["pass"] = bool(st.m > max(1.25, st.null_max) and to.m > max(1.0, to.null_max))
     print(out.round(3).to_string())
     print("gate (c):", json.dumps(gate), "PASS" if gate["pass"] else "FAIL")
-    (OUT / "check_c.json").write_text(json.dumps(gate, indent=1), encoding="utf-8")
+    (OUT / f"{_pfx()}check_c.json").write_text(json.dumps(gate, indent=1), encoding="utf-8")
     return gate
