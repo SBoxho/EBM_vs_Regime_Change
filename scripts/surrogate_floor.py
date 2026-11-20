@@ -8,6 +8,7 @@ Usage: python scripts/surrogate_floor.py fit    [--workers 16]   # seed-only fit
        add --gen perm for the leakage-free block-permutation surrogate (D-60)
        python scripts/surrogate_floor.py check-rank              # D-62 gates (a)-(d) on the stored perm pairs
        python scripts/surrogate_floor.py real-rank [--workers 16] # D-62 real dir/vol; only after its gates pass
+       python scripts/surrogate_floor.py ext-fit | ext-pairs | ext-summary  # D-65: vol perm surrogates 20-119
 """
 
 import argparse
@@ -15,7 +16,7 @@ import json
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["fit", "pairs", "check", "check-rank", "power", "real", "real-rank"])
+    ap.add_argument("cmd", choices=["fit", "pairs", "check", "check-rank", "power", "real", "real-rank", "ext-fit", "ext-pairs", "ext-summary"])
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--gen", choices=["replace", "perm"], default="replace")
     a = ap.parse_args()
@@ -35,6 +36,10 @@ if __name__ == "__main__":
     elif a.cmd == "power":
         from ebmregime.surfloor_power import cmd_power
         cmd_power(a.workers, gen=a.gen)
+    elif a.cmd.startswith("ext-"):
+        from ebmregime import surfloor_ext as E
+        {"ext-fit": lambda: E.cmd_fit(a.workers), "ext-pairs": lambda: E.cmd_pairs(a.workers),
+         "ext-summary": E.summarise}[a.cmd]()
     elif a.cmd == "real-rank":
         S.cmd_real_rank(a.workers)
     else:

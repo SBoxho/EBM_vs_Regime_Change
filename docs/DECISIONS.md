@@ -552,3 +552,46 @@ Implemented by five sub-agents (models, runner, explain, stability metrics, surr
   - So per-feature rank results can flag unchanged features when the real series has a regime change elsewhere. A plausible cause: surrogates that mix regimes fit a weaker main effect, which changes early stopping and so the noise in every other shape. This is one synthetic series and is not tested further.
   - Per-feature Ū results on real data are therefore exploratory, reported with M.
 - *Status:* by D-62, real dir and vol drift may now be computed (`scripts/surrogate_floor.py real-rank`; every real seed fit is already cached). It has not been run. vol is eligible for confirmatory status; dir is exploratory by (d). Whether H1–H5 stay confirmatory is the user's decision.
+
+**D-64. Real dir and vol drift under the D-62 gates (first look at any real dir or vol drift result beyond the D-54 printout).** Run after D-62/D-63 were committed (`d4230a0`). 1,124 real pairs from the cached seed fits (`scripts/surrogate_floor.py real-rank`, `results/surfloor/perm_rank_real*.csv`). Pool: real plus the 20 perm surrogates. The smallest attainable p is 1/21 = 0.048.
+- *vol (precise, D-63):*
+  - Δ = 12: M = 1.31, rank 1 of 21 (p = 0.048), above every surrogate (max 1.17). Ū = 0.67 against a surrogate max of 0.63. The seed-adjusted version is the same (1.31).
+  - Drift grows with lag: M = 0.98 at Δ = 6 (rank 11), 1.47 at Δ = 18, 1.48 at Δ = 24, 2.14 at Δ = 36. Every lag from 12 up ranks first.
+  - At Δ = 1–3, real vol ranks last or near last (M = 0.84–0.88, at or below the surrogate minimum). Nearby windows are more alike than in any surrogate. On the synthetic panel the same-side pairs showed the same pattern (D-63). Surrogates that mix regimes are noisier than either regime, so the reference is conservative and M understates drift.
+  - *Against H1 as frozen:* the point estimate 1.31 is just above the 1.25 threshold, but D-62 gives no interval. So "CI lower bound above 1.25" cannot be assessed. With the Holm family of six, p = 0.048 cannot reach 0.05/6 ≈ 0.0083, which would need at least 120 pool members.
+- *dir (exploratory, not precise):* no drift beyond the surrogates at any lag. At Δ = 12, M = 0.87 (rank 17 of 21); across lags, M = 0.80–1.00 (ranks 8–19). A dir drift of 1.25 cannot be separated from the null (surrogate range 0.53–1.51). The prereg SNR condition for dir (`h1.dir_requires_snr_above_shuffled`) was not evaluated.
+- *Per feature, Δ = 12 (exploratory, D-63 caveat):*
+  - vol, rank 1 of 21: `hour` (M = 2.27 against a surrogate max of 1.34), `xret_4h` (1.75 against 1.19), `pos_range_168h` (1.77 against 1.64), `rv_level_pct` (1.34, below its max of 1.71). That is 4 of 16, against about 0.8 by chance; the synthetic panel showed 5 of 16 on unchanged features.
+  - The three that exceed their surrogate max by M as well are the most credible. The largest is the intraday (`hour`) profile of volatility.
+  - dir, rank 1 of 21: only `ret_4h` (M = 2.32 against 1.50), about what chance gives.
+- *Status:* vol drifts beyond a stationary 252-h block surrogate at lags of 12 months and more, and dir does not. Confirmatory status of H1–H5, the H1 interval rule under D-62, and more surrogates for a Holm-level p are the user's decisions.
+
+**D-65. DEVIATION (pre-specified before any new fit): 100 more perm surrogates for vol, so the pooled rank test can reach the Holm level.** The user approved this after D-64.
+- *Disclosure:* this is decided after seeing D-64, where real vol ranked first of 21 at Δ ≥ 12. Extending the null after a minimum-p result is a sequential choice. So the 21-member result of D-64 stays on record, and the extended result is reported whatever it shows. No other extension follows from it.
+- *Fits:* perm surrogates 20–119 (indices as in D-60, same generator, seed stream and cache), vol only, 5 seed-only fits per window, all 83 windows (41,500 fits). Pairs at every prereg lag, as in D-61. Code: `src/ebmregime/surfloor_ext.py`; `surfloor_perm.py` is not changed, so its cache keys stay valid.
+- *Pool and statistic:* D-62 unchanged, with real plus surrogates 0–119 (121 members). The smallest attainable p is 1/121 ≈ 0.0083, at or below the Holm bound for the smallest p in a family of six (0.05/6 ≈ 0.0083).
+- *Conditions, Δ = 12, using the 120 surrogates:*
+  - D-62 (a): the median of the 120 vol M_s lies in [0.9, 1.11]. If this fails, the 121-member result is reported but not used.
+  - D-62 (d): precision is recomputed and reported.
+  - Gates (b) and (c) are unaffected (shuf and synthetic).
+- *Reported:* U, M, rank and p_upper for real vol at every lag, plain and seed-adjusted, and per feature at Δ = 12 (exploratory, D-63). Whether p at Δ = 12 meets Holm within the H1–H5 family, and the H1 interval rule, remain the user's decisions.
+
+**D-66. Extended-null result (D-65): real vol drift is significant at the Holm level at Δ ≥ 18, but not at the pre-registered Δ = 12 (p = 0.033).** 41,500 vol fits on perm surrogates 20–119 (0 errors; 11.6 h wall, about 5 h of it with the machine asleep) and 56,200 pairs (`results/surfloor/perm_ext_*`). Pool: real plus surrogates 0–119 (121 members); the smallest attainable p is 1/121 = 0.0083.
+- *Condition (a), 120 surrogates, Δ = 12:* median M_s = 0.99 (2.5–97.5%: 0.86–1.17). Passes.
+- *Precision (d):* 0.86–1.17, within [0.8, 1.25]. Precise.
+- *Real vol, Δ = 12 (H1 lag):*
+  - M = 1.30, Ū = 0.65; rank 4 of 121, so p_upper = 0.033. Three surrogates have a larger Ū, and the largest surrogate M is 1.29.
+  - With 21 members (D-64) it ranked first. The extended null resolves it to 0.033, which does not reach 0.05/6 ≈ 0.0083.
+  - The seed-adjusted version is the same (M = 1.30, rank 4).
+- *Other lags:*
+  - Δ = 18, 24, 36: M = 1.39, 1.46, 2.03; every one ranks 1 of 121 (p = 0.0083).
+  - Δ = 6: M = 0.95 (rank 57).
+  - Δ = 1–3: M = 0.83–0.88, ranks 111–121. Real windows close in time are more alike than surrogate windows: the conservative reference of D-64.
+- *Per feature, Δ = 12 (exploratory, D-63 caveat):*
+  - `hour`: M = 2.31, rank 1 (p = 0.0083), above every surrogate (max 1.95).
+  - `pos_range_168h`: 1.70, rank 3 (p = 0.025).
+  - `xret_4h`: 1.59, rank 4 (p = 0.033).
+  - `rv_level_pct`: 1.34, rank 7 (p = 0.058).
+  - Every other feature ranks 23 or below.
+- *Reading:* vol drift beyond the stationary 252-h block surrogate grows steadily with lag. It is clear from 18 months on. At 12 months it is borderline: nominally significant (p = 0.033), with point estimate M = 1.30 just above the H1 threshold of 1.25.
+- *Status:* as frozen, H1-vol is tested at Δ = 12. With Holm over six hypotheses it is not significant, unless the family or the lag is changed, which would be a post-hoc deviation. The confirmatory reading of H1–H5 is the user's decision. dir stays exploratory (D-64).
