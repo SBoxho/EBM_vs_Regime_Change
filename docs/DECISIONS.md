@@ -595,3 +595,49 @@ Implemented by five sub-agents (models, runner, explain, stability metrics, surr
   - Every other feature ranks 23 or below.
 - *Reading:* vol drift beyond the stationary 252-h block surrogate grows steadily with lag. It is clear from 18 months on. At 12 months it is borderline: nominally significant (p = 0.033), with point estimate M = 1.30 just above the H1 threshold of 1.25.
 - *Status:* as frozen, H1-vol is tested at Δ = 12. With Holm over six hypotheses it is not significant, unless the family or the lag is changed, which would be a post-hoc deviation. The confirmatory reading of H1–H5 is the user's decision. dir stays exploratory (D-64).
+
+**D-67. Pre-specified (before either is computed): the H1-dir signal condition under the surrogate floor, and the surrogate block-length sensitivity check.** The user approved both after D-66.
+- *(1) H1-dir signal condition* (PLAN §2: H1-dir is interpreted only if direction shapes carry more signal than the shuffled control; otherwise "vacuous"):
+  - *SNR:* SNR_D,j(τ) = A²_D,j(τ) / σ²_sur,j(τ) (D-57).
+    - A² is the mean over the 5 seed-only fits on the window's own X_ref and cells, as in the slice (`window_features.parquet` for real dir and real shuf; recomputed identically for the perm surrogates).
+    - σ²_sur,j(τ) = ½ · the mean of g_s,j over the perm surrogates of the same target and the Δ = 12 pairs that contain τ. For a surrogate member, s itself is left out.
+  - *Summary:* S_D = median over all (τ, j) of SNR_D,j(τ).
+  - *Pool (22, all noise-only under the null):* real dir, real shuf and shuf on perm surrogates 0–19.
+  - *Decision:*
+    - dir carries signal if S_real-dir is the largest of the 22 (one-sided p = 1/22 ≈ 0.045).
+    - Otherwise H1-dir is reported as vacuous.
+    - This rank test replaces "CI excludes 0" (D-58: the bootstrap CI under-covers). It is coarser than the one-sided 2.5% a two-sided CI implies, which is stated with the result.
+  - *Reported:* the ratio S_real-dir / median of the 21 noise members; per feature, the median SNR over τ for real dir against the noise members' maximum; the share of (τ, j) with SNR > 4; real shuf's rank among the 21 noise members (a sanity check).
+- *(2) Block-length sensitivity (D-57, "later"):*
+  - The perm generator (D-60) with mean block 720 h and 2,160 h; surrogates 0–8 each, targets dir and vol, 5 seed-only fits per window, all 83 windows (14,940 fits).
+  - Seed: `stable_seed(prereg seed, symbol, "perm_surrogate_mb", mean_block, i)`. Separate caches (`data/cache/fits_perm_mb720`, `…_mb2160`).
+  - Statistic: D-62 pooled rank, with pool real plus the 9 surrogates (10 members, smallest p = 0.1) at every lag; calibration = median of the 9 surrogate M_s.
+  - Reported against the 252-h results (D-64/D-66). Not gating, and no inference is drawn from p alone at this resolution.
+  - Longer blocks keep more slow variation inside the surrogate, so M should move towards 1 as the block grows. The claim of D-57 ("drift beyond dependence up to about 10 days") is stated for the block length at which drift is still detected.
+- *Code:* `src/ebmregime/surfloor_snr.py`, `src/ebmregime/surfloor_block.py`; `surfloor_perm.py` unchanged.
+
+**D-68. Results of D-67: H1-dir is not vacuous; the vol drift at Δ = 12–24 depends on the surrogate block length.** Both checks run as pre-specified in D-67 (`results/surfloor/snr_*`, `block_*`). Block run: 14,940 fits (0 errors), 1 h 40 min wall.
+- *(1) H1-dir signal condition:*
+  - S_real-dir = 0.47; it ranks 1 of 22 noise-only members (noise median 0.16, max 0.28; ratio to the median 2.9). One-sided p = 1/22 ≈ 0.045, coarser than the 2.5% a two-sided CI implies (stated in D-67). By the D-67 rule dir carries signal, so H1-dir is interpretable (and stays exploratory, D-64).
+  - Per feature: 11 of 16 have a real-dir median SNR above every noise member. The largest are `ret_1h` (2.2) and `pos_range_24h` (1.33).
+  - Share of (τ, j) with SNR > 4: real dir 11.7%, real shuf 7.2%.
+  - Sanity check: real shuf ranks 8 of the 21 noise members.
+  - *Scale caveat:* σ²_sur is half the mean of a right-skewed g, so it runs high and every member's absolute SNR is depressed (real vol: S = 2.48). The plan's SNR > 4 threshold is therefore not comparable at face value; the pooled rank is unaffected, since every member shares the same floor.
+- *(2) Block-length sensitivity (pool real + 9 surrogates, smallest p = 0.1; not gating):*
+
+  | Mean block | vol Δ = 12 | vol Δ = 18 | vol Δ = 24 | vol Δ = 36 | Calibration median M_s, vol Δ = 12 |
+  |---|---|---|---|---|---|
+  | 252 h (surrogates 0–8, matched pool) | 1.31 (1) | 1.50 (1) | 1.57 (1) | 2.18 (1) | 0.98 |
+  | 720 h | 1.15 (2) | 1.25 (1) | 1.36 (1) | 1.86 (1) | 1.01 |
+  | 2,160 h | 0.98 (9) | 1.07 (6) | 1.01 (4) | 1.41 (1) | 1.00 |
+
+  Entries are M_real (rank of 10). The 252-h row is recomputed from the D-61/D-64 pairs with surrogates 0–8 only, so the pool matches; it was not in D-67 and is reported for comparison.
+  - Calibration holds at every block length (median M_s 0.91–1.06 across lags and targets). The surrogate spread widens with the block (vol Δ = 12: 0.85–1.16 at 720 h, 0.69–1.20 at 2,160 h), because fewer, longer blocks keep each surrogate closer to the real ordering.
+  - dir: no drift at any block length (M 0.79–1.14, ranks 4–10), as at 252 h.
+  - vol at Δ = 1–6 ranks last or near last at every block length, as at 252 h (D-64).
+- *Reading:*
+  - Drift at Δ = 12 is detected beyond dependence up to about 10 days (252 h) and weakly at about 30 days (720 h: M = 1.15, below the H1 threshold of 1.25). It is explained by dependence at about 90 days (2,160 h).
+  - At Δ = 36 drift survives every block length tried (M = 1.41 at 2,160 h, rank 1).
+  - So the 12–24-month vol drift of D-64/D-66 is consistent with slow, months-long variation in the volatility relationship that a 2,160-h block surrogate preserves. Whether that counts as "regime change" or as long memory is a matter of definition the data at hand cannot settle. The D-57 claim is stated as: vol drifts beyond a stationary surrogate with dependence up to about 10 days (Δ ≥ 12) and up to about 90 days (Δ = 36 only).
+  - The 2,160-h surrogate has few blocks per symbol, so its power is lower; this reading is not inference from p (smallest p = 0.1, D-67).
+- *Status:* H1-dir is non-vacuous (exploratory). H1-vol at Δ = 12 is sensitive to the null's block length. The confirmatory reading of H1–H5, and which block length (if any) defines the H1 null, are the user's decisions.
